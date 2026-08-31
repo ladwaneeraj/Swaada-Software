@@ -112,12 +112,17 @@ export type TableStatus = 'available' | 'occupied'
 /* Orders                                                              */
 /* ------------------------------------------------------------------ */
 
+/**
+ * A table orders in rounds: each round is one Order (one kitchen ticket).
+ * Rounds stay 'delivered' (bill open) until the table settles; settling
+ * groups them into a Bill and marks them 'settled'.
+ */
 export const ORDER_STATUSES = [
   'placed',
   'preparing',
   'ready',
   'delivered',
-  'served',
+  'settled',
   'cancelled',
 ] as const
 export type OrderStatus = (typeof ORDER_STATUSES)[number]
@@ -170,13 +175,47 @@ export interface Order {
   total: number
   createdByUserId: ID
   createdByName: string
+  /** Captured optionally on a table's first round (configurable). */
+  customerName?: string
+  customerPhone?: string
   placedAt: string
   startedAt?: string
   readyAt?: string
   deliveredAt?: string
-  servedAt?: string
+  settledAt?: string
   cancelledAt?: string
   cancelReason?: string
+  /** Set when the round is settled into a bill. */
+  billId?: ID
+  paymentMethod?: PaymentMethod
+}
+
+/* ------------------------------------------------------------------ */
+/* Billing                                                             */
+/* ------------------------------------------------------------------ */
+
+export const PAYMENT_METHODS = ['cash', 'upi'] as const
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number]
+
+/** One settled sitting: all of a table's rounds paid together at the end. */
+export interface Bill {
+  id: ID
+  billNumber: number
+  tableId: ID | null
+  tableName: string
+  orderIds: ID[]
+  orderNumbers: number[]
+  customerName?: string
+  customerPhone?: string
+  subtotal: number
+  taxLabel: string
+  taxRatePercent: number
+  taxAmount: number
+  total: number
+  paymentMethod: PaymentMethod
+  settledAt: string
+  settledByUserId: ID
+  settledByName: string
 }
 
 /* ------------------------------------------------------------------ */
@@ -209,6 +248,8 @@ export interface CafeSettings {
   taxLabel: string
   taxRatePercent: number
   currency: 'INR'
+  /** Ask for customer name & mobile on a table's first round (optional). */
+  askCustomerInfo: boolean
 }
 
 /* ------------------------------------------------------------------ */
@@ -224,9 +265,10 @@ export interface DBSnapshot {
   stations: Station[]
   tables: CafeTable[]
   orders: Order[]
+  bills: Bill[]
   users: User[]
   settings: CafeSettings
-  counters: { nextOrderNumber: number }
+  counters: { nextOrderNumber: number; nextBillNumber: number }
 }
 
 /* ------------------------------------------------------------------ */
@@ -240,7 +282,7 @@ export type RealtimeEvent =
   | { type: 'ITEM_READY'; orderId: ID; itemId: ID }
   | { type: 'ORDER_READY'; orderId: ID }
   | { type: 'ORDER_DELIVERED'; orderId: ID }
-  | { type: 'ORDER_SERVED'; orderId: ID }
+  | { type: 'BILL_SETTLED'; billId: ID; tableId: ID | null }
   | { type: 'ORDER_CANCELLED'; orderId: ID }
   | { type: 'MENU_UPDATED' }
   | { type: 'TABLES_UPDATED' }

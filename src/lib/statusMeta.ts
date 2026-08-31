@@ -1,4 +1,4 @@
-import type { ItemAvailability, OrderItemStatus, OrderStatus, TableStatus } from '@/types'
+import type { ItemAvailability, OrderItemStatus, OrderStatus, PaymentMethod, TableStatus } from '@/types'
 
 /**
  * Presentation metadata for every status in the system, defined ONCE.
@@ -18,8 +18,13 @@ export const ORDER_STATUS_META: Record<OrderStatus, StatusMeta> = {
   preparing: { label: 'Preparing', tone: 'warn' },
   ready: { label: 'Ready', tone: 'ok' },
   delivered: { label: 'Delivered', tone: 'accent' },
-  served: { label: 'Served', tone: 'neutral' },
+  settled: { label: 'Paid', tone: 'neutral' },
   cancelled: { label: 'Cancelled', tone: 'danger' },
+}
+
+export const PAYMENT_METHOD_META: Record<PaymentMethod, { label: string; icon: string }> = {
+  cash: { label: 'Cash', icon: '💵' },
+  upi: { label: 'UPI', icon: '📱' },
 }
 
 export const ITEM_STATUS_META: Record<OrderItemStatus, StatusMeta> = {
@@ -40,10 +45,3 @@ export const TABLE_STATUS_META: Record<TableStatus, StatusMeta> = {
   occupied: { label: 'Occupied', tone: 'warn' },
 }
 
-/** What the admin can do next for an order in a given status. */
-export const NEXT_ORDER_ACTION: Partial<
-  Record<OrderStatus, { to: Extract<OrderStatus, 'delivered' | 'served'>; label: string }>
-> = {
-  ready: { to: 'delivered', label: 'Mark delivered' },
-  delivered: { to: 'served', label: 'Mark served' },
-}

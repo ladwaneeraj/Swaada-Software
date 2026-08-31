@@ -6,7 +6,7 @@ import { Badge, Button, Card, EmptyState, Stat } from '@/components/ui'
 import { ORDER_STATUS_META } from '@/lib/statusMeta'
 import { elapsedLabel, formatINR, isToday, timeLabel } from '@/lib/utils'
 import { useNow } from '@/lib/useNow'
-import { activeOrderForTable, isActiveOrder } from '@/services'
+import { activeOrdersForTable, isActiveOrder } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
 
 /** Morning-glance view: how today is going and what needs attention now. */
@@ -18,9 +18,7 @@ export function DashboardPage() {
 
   const stats = useMemo(() => {
     const today = orders.filter((o) => isToday(o.placedAt))
-    const revenue = today
-      .filter((o) => o.status === 'served' || o.status === 'delivered')
-      .reduce((sum, o) => sum + o.total, 0)
+    const revenue = today.filter((o) => o.status === 'settled').reduce((sum, o) => sum + o.total, 0)
     const fulfilled = today.filter((o) => o.readyAt)
     const avgReadyMin =
       fulfilled.length === 0
@@ -54,7 +52,8 @@ export function DashboardPage() {
   )
 
   const activeTables = tables.filter((t) => t.isActive)
-  const occupied = activeTables.filter((t) => activeOrderForTable(orders, t.id)).length
+  const occupied = activeTables.filter((t) => activeOrdersForTable(orders, t.id).length > 0).length
+  const unsettled = activeOrders.reduce((s, o) => s + o.total, 0)
 
   return (
     <div>
@@ -69,9 +68,14 @@ export function DashboardPage() {
       />
 
       <div className="mb-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Stat label="Today's revenue" value={formatINR(stats.revenue)} sub="delivered + served" icon={<IndianRupee className="size-5" />} />
-        <Stat label="Orders today" value={String(stats.ordersToday)} icon={<ReceiptText className="size-5" />} />
-        <Stat label="Active now" value={String(activeOrders.length)} sub={`${occupied}/${activeTables.length} tables occupied`} icon={<Flame className="size-5" />} />
+        <Stat label="Collected today" value={formatINR(stats.revenue)} sub="settled bills" icon={<IndianRupee className="size-5" />} />
+        <Stat label="Rounds today" value={String(stats.ordersToday)} icon={<ReceiptText className="size-5" />} />
+        <Stat
+          label="Open on tables"
+          value={String(activeOrders.length)}
+          sub={`${occupied}/${activeTables.length} tables · ${formatINR(unsettled)} unsettled`}
+          icon={<Flame className="size-5" />}
+        />
         <Stat
           label="Avg. kitchen time"
           value={stats.avgReadyMin === null ? '—' : `${stats.avgReadyMin.toFixed(1)} min`}

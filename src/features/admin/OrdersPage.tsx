@@ -5,7 +5,7 @@ import { PageHeader } from '@/components/layout/AdminLayout'
 import { OrderItemLine, OrderTotals } from '@/components/order/OrderBits'
 import { useToasts } from '@/components/toast'
 import { Badge, Button, Card, EmptyState, Field, Modal, Textarea } from '@/components/ui'
-import { NEXT_ORDER_ACTION, ORDER_STATUS_META } from '@/lib/statusMeta'
+import { ORDER_STATUS_META } from '@/lib/statusMeta'
 import { cn, elapsedLabel, timeLabel } from '@/lib/utils'
 import { useNow } from '@/lib/useNow'
 import { isActiveOrder, orderService } from '@/services'
@@ -119,8 +119,6 @@ function OrderCard({
   onCancel: () => void
 }) {
   const meta = ORDER_STATUS_META[order.status]
-  const nextAction = NEXT_ORDER_ACTION[order.status]
-  const pushToast = useToasts((s) => s.push)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -140,6 +138,7 @@ function OrderCard({
             </p>
             <p className="text-xs text-ink-500">
               Placed {timeLabel(order.placedAt)} by {order.createdByName}
+              {order.customerName && ` · for ${order.customerName}`}
             </p>
           </div>
           <Badge tone={meta.tone} dot>
@@ -168,29 +167,26 @@ function OrderCard({
           <OrderTotals order={order} compact />
         </div>
 
-        <div className="mt-4 flex gap-2">
-          {nextAction && (
-            <Button
-              className="flex-1"
-              variant={nextAction.to === 'served' ? 'dark' : 'success'}
-              onClick={() => {
-                if (nextAction.to === 'delivered') orderService.markDelivered(order.id)
-                else orderService.markServed(order.id)
-                pushToast(
-                  nextAction.to === 'delivered'
-                    ? `Order #${order.orderNumber} delivered to ${order.tableName}`
-                    : `Order #${order.orderNumber} served · table ${order.tableName} is free`,
-                  'ok',
-                )
-              }}
+        <div className="mt-4 flex items-center gap-2">
+          {order.status === 'delivered' ? (
+            // The kitchen delivers; the bill stays open until settled at Tables.
+            <Link
+              to="/admin/tables"
+              className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-ink-900 text-sm font-semibold text-white hover:bg-ink-700"
             >
-              {nextAction.label}
-            </Button>
-          )}
-          {order.status !== 'delivered' && (
-            <Button variant="ghost" className="text-danger-600" onClick={onCancel}>
-              Cancel
-            </Button>
+              On the table · settle bill from Tables
+            </Link>
+          ) : (
+            <>
+              <p className="flex-1 text-xs text-ink-500">
+                {order.status === 'ready'
+                  ? 'Kitchen will mark it delivered'
+                  : 'With the kitchen'}
+              </p>
+              <Button variant="ghost" className="text-danger-600" onClick={onCancel}>
+                Cancel
+              </Button>
+            </>
           )}
         </div>
       </Card>

@@ -2,6 +2,7 @@ import { IndianRupee, ReceiptText, Soup, TrendingUp } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { PageHeader } from '@/components/layout/AdminLayout'
 import { Card, EmptyState, Segmented, Stat } from '@/components/ui'
+import { PAYMENT_METHOD_META } from '@/lib/statusMeta'
 import { cn, formatINR } from '@/lib/utils'
 import { useAppStore } from '@/store/useAppStore'
 import type { Order } from '@/types'
@@ -22,7 +23,7 @@ export function AnalyticsPage() {
     <div>
       <PageHeader
         title="Analytics"
-        sub="Sales figures update the moment an order is served"
+        sub="Figures update the moment a bill is settled"
         actions={
           <Segmented
             value={range}
@@ -37,9 +38,9 @@ export function AnalyticsPage() {
       />
 
       <div className="mb-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Stat label="Revenue (served)" value={formatINR(data.revenue)} icon={<IndianRupee className="size-5" />} />
-        <Stat label="Orders" value={String(data.orderCount)} sub="excluding cancelled" icon={<ReceiptText className="size-5" />} />
-        <Stat label="Avg order value" value={data.orderCount ? formatINR(data.revenue / Math.max(1, data.servedCount)) : '—'} icon={<TrendingUp className="size-5" />} />
+        <Stat label="Collected" value={formatINR(data.revenue)} sub="settled bills" icon={<IndianRupee className="size-5" />} />
+        <Stat label="Rounds" value={String(data.orderCount)} sub="excluding cancelled" icon={<ReceiptText className="size-5" />} />
+        <Stat label="Avg round value" value={data.settledCount ? formatINR(data.revenue / data.settledCount) : '—'} icon={<TrendingUp className="size-5" />} />
         <Stat label="Items sold" value={String(data.itemsSold)} icon={<Soup className="size-5" />} />
       </div>
 
@@ -49,7 +50,7 @@ export function AnalyticsPage() {
         <div className="grid gap-5 lg:grid-cols-2">
           <Card className="p-5">
             <h2 className="mb-1 text-base font-bold">Revenue by day</h2>
-            <p className="mb-4 text-xs text-ink-500">Served orders, last 7 days</p>
+            <p className="mb-4 text-xs text-ink-500">Settled rounds, last 7 days</p>
             <ColumnChart
               points={data.revenueByDay.map((d) => ({ label: d.label, value: d.revenue, detail: `${d.label} — ${formatINR(d.revenue)}` }))}
               format={(v) => formatINR(v)}
@@ -83,6 +84,22 @@ export function AnalyticsPage() {
               }))}
             />
           </Card>
+
+          <Card className="p-5">
+            <h2 className="mb-1 text-base font-bold">Payments</h2>
+            <p className="mb-4 text-xs text-ink-500">Cash vs UPI, settled bills in this range</p>
+            {data.payments.length === 0 ? (
+              <p className="py-8 text-center text-sm text-ink-500">No settled bills yet.</p>
+            ) : (
+              <BarList
+                rows={data.payments.map(([label, amount]) => ({
+                  label,
+                  value: amount,
+                  valueLabel: formatINR(amount),
+                }))}
+              />
+            )}
+          </Card>
         </div>
       )}
     </div>
@@ -102,9 +119,17 @@ function computeAnalytics(orders: Order[], range: Range) {
         : new Date(0)
 
   const inRange = orders.filter((o) => new Date(o.placedAt) >= cutoff && o.status !== 'cancelled')
-  const served = inRange.filter((o) => o.status === 'served')
+  const settled = inRange.filter((o) => o.status === 'settled')
 
-  const revenue = served.reduce((s, o) => s + o.total, 0)
+  const revenue = settled.reduce((s, o) => s + o.total, 0)
+
+  const paymentSplit = new Map<string, number>()
+  settled.forEach((o) => {
+    if (o.paymentMethod) {
+      const label = PAYMENT_METHOD_META[o.paymentMethod].label
+      paymentSplit.set(label, (paymentSplit.get(label) ?? 0) + o.total)
+    }
+  })
   const itemsSold = inRange.reduce(
     (s, o) => s + o.items.filter((i) => i.status !== 'cancelled').reduce((n, i) => n + i.quantity, 0),
     0,
@@ -115,7 +140,7 @@ function computeAnalytics(orders: Order[], range: Range) {
     const day = new Date(startOfToday.getTime() - (6 - i) * 86400000)
     const next = new Date(day.getTime() + 86400000)
     const dayRevenue = orders
-      .filter((o) => o.status === 'served')
+      .filter((o) => o.status === 'settled')
       .filter((o) => {
         const t = new Date(o.placedAt)
         return t >= day && t < next
@@ -149,12 +174,13 @@ function computeAnalytics(orders: Order[], range: Range) {
   return {
     revenue,
     orderCount: inRange.length,
-    servedCount: served.length,
+    settledCount: settled.length,
     itemsSold,
     revenueByDay,
     ordersByHour,
     topItems: [...itemCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
     byCategory: [...categoryRevenue.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
+    payments: [...paymentSplit.entries()].sort((a, b) => b[1] - a[1]),
   }
 }
 

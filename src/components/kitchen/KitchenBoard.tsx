@@ -1,9 +1,9 @@
-import { Check, ChefHat, Timer } from 'lucide-react'
+import { Check, ChefHat, HandPlatter, Timer } from 'lucide-react'
 import { useMemo } from 'react'
 import { Badge, VegMark } from '@/components/ui'
 import { cn, elapsedLabel, minutesSince } from '@/lib/utils'
 import { useNow } from '@/lib/useNow'
-import { isActiveOrder, kitchenService } from '@/services'
+import { isKitchenActiveOrder, kitchenService, orderService } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
 import type { Order, OrderItem } from '@/types'
 
@@ -18,7 +18,8 @@ export function KitchenBoard({ dark = false }: { dark?: boolean }) {
   const now = useNow()
 
   const lanes = useMemo(() => {
-    const active = orders.filter(isActiveOrder).sort((a, b) => a.placedAt.localeCompare(b.placedAt))
+    // Delivered rounds leave the board — from there it's a billing matter.
+    const active = orders.filter(isKitchenActiveOrder).sort((a, b) => a.placedAt.localeCompare(b.placedAt))
     return {
       incoming: active.filter((o) => o.status === 'placed'),
       preparing: active.filter((o) => o.status === 'preparing'),
@@ -38,7 +39,7 @@ export function KitchenBoard({ dark = false }: { dark?: boolean }) {
           <Ticket key={o.id} order={o} now={now} dark={dark} />
         ))}
       </Lane>
-      <Lane title="Ready · waiting for delivery" count={lanes.waiting.length} tone="ok" dark={dark}>
+      <Lane title="Ready · take to table" count={lanes.waiting.length} tone="ok" dark={dark}>
         {lanes.waiting.map((o) => (
           <Ticket key={o.id} order={o} now={now} dark={dark} />
         ))}
@@ -153,9 +154,20 @@ function Ticket({ order, now, dark }: { order: Order; now: number; dark: boolean
           </div>
         )}
         {order.status === 'ready' && (
-          <p className="rounded-xl bg-ok-600 py-2.5 text-center text-sm font-bold uppercase tracking-wide text-white">
-            Ready for delivery{order.readyAt ? ` · waiting ${elapsedLabel(order.readyAt, now)}` : ''}
-          </p>
+          <div className="space-y-2">
+            {order.readyAt && (
+              <p className="text-center text-xs font-semibold text-ink-500">
+                Ready · waiting {elapsedLabel(order.readyAt, now)}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() => orderService.markDelivered(order.id)}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-ok-600 text-sm font-bold uppercase tracking-wide text-white hover:opacity-90"
+            >
+              <HandPlatter className="size-5" /> Delivered to table
+            </button>
+          </div>
         )}
       </footer>
     </article>

@@ -2,7 +2,7 @@ import { ArrowLeft, Minus, Plus, Search, ShoppingBag, Trash2 } from 'lucide-reac
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useToasts } from '@/components/toast'
-import { Badge, Button, Card, Modal, Textarea, VegMark } from '@/components/ui'
+import { Badge, Button, Card, Input, Modal, Textarea, VegMark } from '@/components/ui'
 import { byDisplayOrder, cn, formatINR } from '@/lib/utils'
 import {
   itemsForCategory,
@@ -10,7 +10,7 @@ import {
   orderService,
   searchMenu,
   sortedActiveCategories,
-  activeOrderForTable,
+  activeOrdersForTable,
   type CartModifierSelection,
 } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
@@ -51,13 +51,18 @@ export function TakeOrderPage() {
   const settings = useAppStore((s) => s.db.settings)
 
   const table = tables.find((t) => t.id === tableId)
-  const existingOrder = table ? activeOrderForTable(orders, table.id) : undefined
+  const existingRounds = table ? activeOrdersForTable(orders, table.id) : []
+  const roundNumber = existingRounds.length + 1
+  const billSoFar = existingRounds.reduce((s, o) => s + o.total, 0)
+  const askCustomer = settings.askCustomerInfo && roundNumber === 1
 
   const [query, setQuery] = useState('')
   const [activeCategoryId, setActiveCategoryId] = useState<ID | 'all'>('all')
   const [lines, setLines] = useState<CartLine[]>([])
   const [sheet, setSheet] = useState<{ item: MenuItem; editingKey?: string } | null>(null)
   const [cartOpen, setCartOpen] = useState(false)
+  const [customerName, setCustomerName] = useState('')
+  const [customerPhone, setCustomerPhone] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
 
   const activeCategories = useMemo(() => sortedActiveCategories(categories), [categories])
@@ -170,10 +175,41 @@ export function TakeOrderPage() {
         specialInstructions: l.specialInstructions,
       })),
       session,
+      customerName: askCustomer ? customerName : undefined,
+      customerPhone: askCustomer ? customerPhone : undefined,
     })
-    pushToast(`Order #${order.orderNumber} sent to kitchen`, 'ok')
-    navigate(`/admin/orders?focus=${order.id}`)
+    pushToast(`Round ${roundNumber} · order #${order.orderNumber} sent to kitchen`, 'ok')
+    navigate('/admin/tables')
   }
+
+  // Optional customer capture on the table's first round (configurable in
+  // Settings). Shared by the desktop cart panel and the mobile cart sheet.
+  const customerSlot = askCustomer ? (
+    <div className="space-y-2 border-t border-cream-200 py-3">
+      <p className="text-xs font-bold uppercase tracking-wide text-ink-500">
+        Customer <span className="font-normal normal-case">(optional)</span>
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <Input
+          value={customerName}
+          onChange={(e) => setCustomerName(e.target.value)}
+          placeholder="Name"
+          aria-label="Customer name"
+          className="h-10 text-sm"
+        />
+        <Input
+          value={customerPhone}
+          onChange={(e) => setCustomerPhone(e.target.value)}
+          placeholder="Mobile"
+          type="tel"
+          inputMode="tel"
+          maxLength={15}
+          aria-label="Customer mobile"
+          className="h-10 text-sm"
+        />
+      </div>
+    </div>
+  ) : undefined
 
   if (!table) {
     return (
@@ -203,16 +239,12 @@ export function TakeOrderPage() {
             <h1 className="text-xl font-bold tracking-tight">
               Table {table.name} <span className="font-normal text-ink-500">· {table.zone}</span>
             </h1>
-            <p className="text-xs text-ink-500">New order</p>
+            <p className="text-xs text-ink-500">
+              Round {roundNumber}
+              {roundNumber > 1 && ` · bill so far ${formatINR(billSoFar)}`}
+            </p>
           </div>
         </div>
-
-        {existingOrder && (
-          <div className="mb-4 rounded-xl border border-warn-600/30 bg-warn-100 px-4 py-3 text-sm font-semibold text-warn-600">
-            This table already has active order #{existingOrder.orderNumber}. Placing another will
-            create a second ticket.
-          </div>
-        )}
 
         {/* Search */}
         <div className="relative mb-3">
@@ -260,7 +292,7 @@ export function TakeOrderPage() {
         {visibleItems.length === 0 ? (
           <p className="py-16 text-center text-sm text-ink-500">No items match “{query}”.</p>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-3">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(8.25rem,1fr))] gap-2 sm:grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] sm:gap-3">
             {visibleItems.map((item) => (
               <ProductCard
                 key={item.id}
@@ -286,6 +318,8 @@ export function TakeOrderPage() {
           <CartPanel
             lines={lines}
             tableName={table.name}
+            roundNumber={roundNumber}
+            customerSlot={customerSlot}
             subtotal={subtotal}
             taxAmount={taxAmount}
             taxLabel={settings.taxLabel}
@@ -321,11 +355,13 @@ export function TakeOrderPage() {
         </div>
       )}
 
-      <Modal open={cartOpen} onClose={() => setCartOpen(false)} title={`Order · Table ${table.name}`} position="sheet">
+      <Modal open={cartOpen} onClose={() => setCartOpen(false)} title={`Table ${table.name} · round ${roundNumber}`} position="sheet">
         <CartPanel
           bare
           lines={lines}
           tableName={table.name}
+          roundNumber={roundNumber}
+          customerSlot={customerSlot}
           subtotal={subtotal}
           taxAmount={taxAmount}
           taxLabel={settings.taxLabel}
@@ -421,46 +457,46 @@ function ProductCard({
         className="flex flex-1 flex-col text-left"
         aria-label={customizable ? `Customize ${item.name}` : item.name}
       >
-        <div className="relative flex h-20 items-center justify-center bg-gradient-to-br from-cream-100 to-cream-200 text-4xl" aria-hidden>
+        <div className="relative flex h-12 items-center justify-center bg-gradient-to-br from-cream-100 to-cream-200 text-2xl sm:h-20 sm:text-4xl" aria-hidden>
           {item.image ? (
             <img src={item.image} alt="" className="h-full w-full object-cover" />
           ) : (
             <span>{categoryIcon}</span>
           )}
-          <div className="absolute left-2 top-2 flex gap-1">
+          <div className="absolute left-2 top-2 hidden gap-1 sm:flex">
             {item.isPopular && <Badge tone="accent">Popular</Badge>}
             {item.isRecommended && <Badge tone="ok">Pick</Badge>}
           </div>
         </div>
-        <div className="flex flex-1 flex-col p-3">
-          <p className="flex items-start gap-1.5 text-sm font-bold leading-snug">
-            <VegMark isVeg={item.isVegetarian} className="mt-0.5" />
+        <div className="flex flex-1 flex-col p-2 sm:p-3">
+          <p className="flex items-start gap-1.5 text-[13px] font-bold leading-snug sm:text-sm">
+            <VegMark isVeg={item.isVegetarian} className="mt-0.5 size-3.5 sm:size-4" />
             {item.name}
           </p>
-          <p className="mt-1 line-clamp-2 text-xs text-ink-500">{item.description}</p>
-          <p className="mt-auto pt-2 text-sm font-bold tabular-nums">
+          <p className="mt-1 line-clamp-2 text-xs text-ink-500 max-sm:hidden">{item.description}</p>
+          <p className="mt-auto pt-1.5 text-[13px] font-bold tabular-nums sm:pt-2 sm:text-sm">
             {hasPricedSize && <span className="font-normal text-ink-500">from </span>}
             {formatINR(item.basePrice)}
           </p>
         </div>
       </button>
 
-      <div className="px-3 pb-3">
+      <div className="px-2 pb-2 sm:px-3 sm:pb-3">
         {unavailable ? (
-          <div className="grid h-10 place-items-center rounded-xl bg-cream-200 text-xs font-bold uppercase tracking-wide text-ink-500">
+          <div className="grid h-9 place-items-center rounded-lg bg-cream-200 text-[11px] font-bold uppercase tracking-wide text-ink-500 sm:h-10 sm:rounded-xl sm:text-xs">
             Unavailable
           </div>
         ) : qtyInCart === 0 ? (
-          <Button size="sm" className="h-10 w-full" onClick={onQuickAdd}>
+          <Button size="sm" className="h-9 w-full sm:h-10" onClick={onQuickAdd}>
             <Plus className="size-4" /> Add
           </Button>
         ) : (
-          <div className="flex h-10 items-center justify-between rounded-xl bg-ink-900 px-1 text-white">
-            <button type="button" onClick={onDecrement} aria-label={`Remove one ${item.name}`} className="grid size-8 place-items-center rounded-lg hover:bg-white/10">
+          <div className="flex h-9 items-center justify-between rounded-lg bg-ink-900 px-1 text-white sm:h-10 sm:rounded-xl">
+            <button type="button" onClick={onDecrement} aria-label={`Remove one ${item.name}`} className="grid size-7 place-items-center rounded-md hover:bg-white/10 sm:size-8 sm:rounded-lg">
               <Minus className="size-4" />
             </button>
             <span className="text-sm font-bold tabular-nums">{qtyInCart}</span>
-            <button type="button" onClick={onQuickAdd} aria-label={`Add one ${item.name}`} className="grid size-8 place-items-center rounded-lg hover:bg-white/10">
+            <button type="button" onClick={onQuickAdd} aria-label={`Add one ${item.name}`} className="grid size-7 place-items-center rounded-md hover:bg-white/10 sm:size-8 sm:rounded-lg">
               <Plus className="size-4" />
             </button>
           </div>
@@ -476,6 +512,8 @@ function CartPanel({
   bare = false,
   lines,
   tableName,
+  roundNumber,
+  customerSlot,
   subtotal,
   taxAmount,
   taxLabel,
@@ -489,6 +527,8 @@ function CartPanel({
   bare?: boolean
   lines: CartLine[]
   tableName: string
+  roundNumber: number
+  customerSlot?: React.ReactNode
   subtotal: number
   taxAmount: number
   taxLabel: string
@@ -503,7 +543,9 @@ function CartPanel({
     <>
       {!bare && (
         <div className="border-b border-cream-200 px-5 py-4">
-          <p className="text-base font-bold">Order · Table {tableName}</p>
+          <p className="text-base font-bold">
+            Table {tableName} <span className="font-normal text-ink-500">· round {roundNumber}</span>
+          </p>
           <p className="text-xs text-ink-500">{lines.length === 0 ? 'No items yet' : `${lines.reduce((n, l) => n + l.quantity, 0)} items`}</p>
         </div>
       )}
@@ -549,8 +591,9 @@ function CartPanel({
           })
         )}
       </div>
-      <div className={cn('border-t border-cream-200', bare ? 'pt-4' : 'px-5 py-4')}>
-        <div className="space-y-1 text-sm">
+      <div className={cn('border-t border-cream-200', bare ? 'pt-2' : 'px-5 pb-4 pt-2')}>
+        {customerSlot}
+        <div className="space-y-1 pt-2 text-sm">
           <div className="flex justify-between text-ink-500">
             <span>Subtotal</span>
             <span className="tabular-nums">{formatINR(subtotal)}</span>

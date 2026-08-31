@@ -1,5 +1,6 @@
 import { byDisplayOrder, nowISO, round2, uid } from '@/lib/utils'
 import type {
+  Bill,
   CafeSettings,
   CafeTable,
   Category,
@@ -12,6 +13,7 @@ import type {
   OrderItem,
   OrderItemModifier,
   OrderItemStatus,
+  PaymentMethod,
   RealtimeEvent,
   Session,
   Station,
@@ -226,6 +228,8 @@ export const orderService = {
     tableId: ID | null
     lines: PlaceOrderLine[]
     session: Session
+    customerName?: string
+    customerPhone?: string
   }): Order {
     let created: Order | null = null
     db.mutate((draft) => {
@@ -271,6 +275,8 @@ export const orderService = {
         ...computeTotals(items, draft.settings),
         createdByUserId: input.session.userId,
         createdByName: input.session.name,
+        customerName: input.customerName?.trim() || undefined,
+        customerPhone: input.customerPhone?.trim() || undefined,
         placedAt: now,
       }
       draft.counters.nextOrderNumber += 1
@@ -285,7 +291,9 @@ export const orderService = {
   cancelOrder(orderId: ID, reason: string): void {
     db.mutate((draft) => {
       const order = draft.orders.find((o) => o.id === orderId)
-      if (!order || order.status === 'served' || order.status === 'cancelled') return
+      // Delivered rounds are part of the open bill and can't be cancelled here.
+      if (!order || order.status === 'settled' || order.status === 'cancelled' || order.status === 'delivered')
+        return
       order.status = 'cancelled'
       order.cancelledAt = nowISO()
       order.cancelReason = reason
@@ -296,6 +304,7 @@ export const orderService = {
     })
   },
 
+  /** Called from the KITCHEN when the food is taken to the table. */
   markDelivered(orderId: ID): void {
     db.mutate((draft) => {
       const order = draft.orders.find((o) => o.id === orderId)
@@ -305,15 +314,59 @@ export const orderService = {
       return { type: 'ORDER_DELIVERED', orderId }
     })
   },
+}
 
-  markServed(orderId: ID): void {
+/* ------------------------------- Billing -------------------------------- */
+
+export const billService = {
+  /**
+   * Settle a table: group all of its delivered rounds into one Bill, mark
+   * them paid, and free the table. Refuses while any round is still with
+   * the kitchen (placed/preparing/ready).
+   */
+  settleTable(input: {
+    tableId: ID
+    paymentMethod: PaymentMethod
+    session: Session
+  }): Bill | null {
+    let created: Bill | null = null
     db.mutate((draft) => {
-      const order = draft.orders.find((o) => o.id === orderId)
-      if (!order || order.status !== 'delivered') return
-      order.status = 'served'
-      order.servedAt = nowISO()
-      return { type: 'ORDER_SERVED', orderId }
+      const open = draft.orders.filter((o) => o.tableId === input.tableId && isActiveOrder(o))
+      if (open.length === 0 || open.some((o) => o.status !== 'delivered')) return
+      const now = nowISO()
+      const table = draft.tables.find((t) => t.id === input.tableId)
+      const first = [...open].sort((a, b) => a.placedAt.localeCompare(b.placedAt))[0]
+      const bill: Bill = {
+        id: uid('bill'),
+        billNumber: draft.counters.nextBillNumber,
+        tableId: input.tableId,
+        tableName: table?.name ?? open[0]?.tableName ?? '',
+        orderIds: open.map((o) => o.id),
+        orderNumbers: open.map((o) => o.orderNumber),
+        customerName: first?.customerName,
+        customerPhone: first?.customerPhone,
+        subtotal: round2(open.reduce((s, o) => s + o.subtotal, 0)),
+        taxLabel: draft.settings.taxLabel,
+        taxRatePercent: draft.settings.taxRatePercent,
+        taxAmount: round2(open.reduce((s, o) => s + o.taxAmount, 0)),
+        total: round2(open.reduce((s, o) => s + o.total, 0)),
+        paymentMethod: input.paymentMethod,
+        settledAt: now,
+        settledByUserId: input.session.userId,
+        settledByName: input.session.name,
+      }
+      draft.counters.nextBillNumber += 1
+      draft.bills.push(bill)
+      open.forEach((o) => {
+        o.status = 'settled'
+        o.settledAt = now
+        o.billId = bill.id
+        o.paymentMethod = input.paymentMethod
+      })
+      created = bill
+      return { type: 'BILL_SETTLED', billId: bill.id, tableId: input.tableId }
     })
+    return created
   },
 }
 
@@ -340,7 +393,7 @@ export const kitchenService = {
   setItemStatus(orderId: ID, itemId: ID, status: OrderItemStatus): void {
     db.mutate((draft) => {
       const order = draft.orders.find((o) => o.id === orderId)
-      if (!order || order.status === 'cancelled' || order.status === 'served') return
+      if (!order || !(KITCHEN_ACTIVE_STATUSES as readonly string[]).includes(order.status)) return
       const item = order.items.find((i) => i.id === itemId)
       if (!item) return
 
@@ -428,18 +481,29 @@ export const settingsService = {
 /* Pure functions over the snapshot; usable by any screen without          */
 /* duplicating business rules inside components.                           */
 
+/** Unpaid: on the floor or awaiting settlement. */
 export const ACTIVE_ORDER_STATUSES = ['placed', 'preparing', 'ready', 'delivered'] as const
+
+/** Still the kitchen's problem (delivered rounds are not). */
+export const KITCHEN_ACTIVE_STATUSES = ['placed', 'preparing', 'ready'] as const
 
 export function isActiveOrder(order: Order): boolean {
   return (ACTIVE_ORDER_STATUSES as readonly string[]).includes(order.status)
 }
 
-export function activeOrderForTable(orders: Order[], tableId: ID): Order | undefined {
-  return orders.find((o) => o.tableId === tableId && isActiveOrder(o))
+export function isKitchenActiveOrder(order: Order): boolean {
+  return (KITCHEN_ACTIVE_STATUSES as readonly string[]).includes(order.status)
+}
+
+/** All unpaid rounds for a table, oldest first. */
+export function activeOrdersForTable(orders: Order[], tableId: ID): Order[] {
+  return orders
+    .filter((o) => o.tableId === tableId && isActiveOrder(o))
+    .sort((a, b) => a.placedAt.localeCompare(b.placedAt))
 }
 
 export function tableStatus(orders: Order[], table: CafeTable): 'available' | 'occupied' {
-  return activeOrderForTable(orders, table.id) ? 'occupied' : 'available'
+  return activeOrdersForTable(orders, table.id).length > 0 ? 'occupied' : 'available'
 }
 
 export function sortedActiveCategories(categories: Category[]): Category[] {

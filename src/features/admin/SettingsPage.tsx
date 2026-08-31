@@ -2,7 +2,7 @@ import { RotateCcw } from 'lucide-react'
 import { useState } from 'react'
 import { PageHeader } from '@/components/layout/AdminLayout'
 import { useToasts } from '@/components/toast'
-import { Badge, Button, Card, Field, Input, Modal } from '@/components/ui'
+import { Badge, Button, Card, Field, Input, Modal, Toggle } from '@/components/ui'
 import { byDisplayOrder } from '@/lib/utils'
 import { settingsService } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
@@ -51,6 +51,23 @@ export function SettingsPage() {
         <Button className="mt-4" onClick={save}>
           Save settings
         </Button>
+
+        <div className="mt-5 flex items-center justify-between gap-4 rounded-xl bg-cream-100 px-4 py-3">
+          <div>
+            <p className="text-sm font-semibold">Ask for customer name &amp; mobile</p>
+            <p className="text-xs text-ink-500">
+              Shown on a table's first order. Always optional for the customer.
+            </p>
+          </div>
+          <Toggle
+            checked={settings.askCustomerInfo}
+            onChange={(v) => {
+              settingsService.update({ askCustomerInfo: v })
+              pushToast(v ? 'Customer details will be asked on first orders' : 'Customer details prompt turned off', 'ok')
+            }}
+            label="Ask for customer details"
+          />
+        </div>
       </Card>
 
       <Card className="mb-5 p-5">

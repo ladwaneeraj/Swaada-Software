@@ -3,13 +3,13 @@ import { useMemo, useState } from 'react'
 import { PageHeader } from '@/components/layout/AdminLayout'
 import { OrderItemLine, OrderTotals } from '@/components/order/OrderBits'
 import { Badge, Card, EmptyState, Input, Select } from '@/components/ui'
-import { ORDER_STATUS_META } from '@/lib/statusMeta'
+import { ORDER_STATUS_META, PAYMENT_METHOD_META } from '@/lib/statusMeta'
 import { cn, dateTimeLabel, formatINR } from '@/lib/utils'
 import { isActiveOrder } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
 import type { OrderStatus } from '@/types'
 
-type HistoryFilter = 'all' | Extract<OrderStatus, 'served' | 'cancelled'>
+type HistoryFilter = 'all' | Extract<OrderStatus, 'settled' | 'cancelled'>
 
 /** Completed and cancelled orders. Active orders live on the Orders page. */
 export function HistoryPage() {
@@ -29,6 +29,7 @@ export function HistoryPage() {
           return (
             String(o.orderNumber).includes(q) ||
             o.tableName.toLowerCase().includes(q) ||
+            (o.customerName ?? '').toLowerCase().includes(q) ||
             o.items.some((i) => i.name.toLowerCase().includes(q))
           )
         })
@@ -36,11 +37,11 @@ export function HistoryPage() {
     [orders, filter, query],
   )
 
-  const totalRevenue = finished.filter((o) => o.status === 'served').reduce((s, o) => s + o.total, 0)
+  const totalRevenue = finished.filter((o) => o.status === 'settled').reduce((s, o) => s + o.total, 0)
 
   return (
     <div>
-      <PageHeader title="Order history" sub={`${finished.length} orders · ${formatINR(totalRevenue)} served revenue in view`} />
+      <PageHeader title="Order history" sub={`${finished.length} rounds · ${formatINR(totalRevenue)} collected in view`} />
 
       <div className="mb-4 flex flex-wrap gap-2">
         <Input
@@ -52,7 +53,7 @@ export function HistoryPage() {
         />
         <Select value={filter} onChange={(e) => setFilter(e.target.value as HistoryFilter)} className="w-40" aria-label="Filter history">
           <option value="all">All finished</option>
-          <option value="served">Served</option>
+          <option value="settled">Paid</option>
           <option value="cancelled">Cancelled</option>
         </Select>
       </div>
@@ -82,6 +83,12 @@ export function HistoryPage() {
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
+                    {order.paymentMethod && (
+                      <Badge tone="ok">
+                        {PAYMENT_METHOD_META[order.paymentMethod].icon}{' '}
+                        {PAYMENT_METHOD_META[order.paymentMethod].label}
+                      </Badge>
+                    )}
                     <Badge tone={meta.tone} dot>
                       {meta.label}
                     </Badge>
@@ -101,7 +108,10 @@ export function HistoryPage() {
                     </div>
                     <p className="mt-3 text-xs text-ink-500">
                       Placed {dateTimeLabel(order.placedAt)} by {order.createdByName}
-                      {order.servedAt && ` · served ${dateTimeLabel(order.servedAt)}`}
+                      {order.customerName && ` · customer ${order.customerName}`}
+                      {order.customerPhone && ` (${order.customerPhone})`}
+                      {order.settledAt &&
+                        ` · paid ${dateTimeLabel(order.settledAt)}${order.paymentMethod ? ` by ${PAYMENT_METHOD_META[order.paymentMethod].label}` : ''}`}
                       {order.cancelledAt && ` · cancelled ${dateTimeLabel(order.cancelledAt)}`}
                       {order.cancelReason && ` (${order.cancelReason})`}
                     </p>

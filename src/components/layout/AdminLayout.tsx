@@ -39,9 +39,14 @@ export function AdminLayout() {
   // Surface kitchen progress to the admin without them watching the screen.
   useEffect(() => {
     return realtime.subscribe((event) => {
+      const orders = useAppStore.getState().db.orders
       if (event.type === 'ORDER_READY') {
-        const order = useAppStore.getState().db.orders.find((o) => o.id === event.orderId)
+        const order = orders.find((o) => o.id === event.orderId)
         if (order) pushToast(`Order #${order.orderNumber} · ${order.tableName} is ready`, 'ok')
+      }
+      if (event.type === 'ORDER_DELIVERED') {
+        const order = orders.find((o) => o.id === event.orderId)
+        if (order) pushToast(`Order #${order.orderNumber} delivered · ${order.tableName} bill open`, 'accent')
       }
     })
   }, [pushToast])

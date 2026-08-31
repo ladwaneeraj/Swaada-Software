@@ -28,14 +28,19 @@ on the kitchen tab instantly, and item/order status flows back the same way.
 
 ## The demo flow
 
-Login as Manager → Tables → tap L3 → add Cold Coffee, Veg Sandwich (tap the
-card body to customise: extras, spice, "Cut sandwich in half"), French Fries →
-Place order. In the kitchen tab: Start preparing → tap each item as it
-finishes → the order flips to READY by itself. Back in admin: Mark delivered →
-Mark served → L3 is available again. Also try: marking an item out of stock in
-Menu (it becomes unselectable on the order screen immediately), search
-("coffee" also finds Cappuccino/Latte/Mocha via configurable keywords),
-drag-reordering categories, and cancelling an order.
+A table orders in ROUNDS and pays once at the end. Login as Manager → Tables
+→ tap L3 → optionally enter the customer's name/mobile (asked on the first
+round; toggle in Settings) → add Cold Coffee, Veg Sandwich (tap the card body
+to customise), French Fries → Place order. In the kitchen tab: Start
+preparing → tap items as they finish → the ticket flips to READY by itself →
+tap "Delivered to table" (the kitchen delivers; admin doesn't). Back in
+admin, tap L3 again: the running bill opens — add more rounds, or once
+everything is delivered, pick Cash or UPI and Take payment. That settles all
+rounds into one bill and frees the table. Also try: marking an item out of
+stock in Menu (it becomes unselectable on the order screen immediately),
+search ("coffee" also finds Cappuccino/Latte/Mocha via configurable
+keywords), drag-reordering categories, and cancelling a round that hasn't
+been delivered yet.
 
 Keyboard on the order screen: `/` focuses search, `Enter` adds the first
 match, `Esc` closes the customisation sheet, `Enter` confirms it.
@@ -104,8 +109,9 @@ Components should not need edits for any of the above.
 
 - Realtime sync is same-browser only (BroadcastChannel); two devices need the
   real backend.
-- One active order per table is the assumed flow; placing a second shows a
-  warning but is allowed.
+- Payments record the method (cash/UPI) only — no UPI integration, change
+  calculation, split bills, or refunds yet. Delivered rounds can't be
+  cancelled; a void/refund flow is future work.
 - Images are configurable in the data model (`image` on items/categories) but
   the seed ships without photos; cards fall back to the category icon.
 - The connection badge reports browser online/offline, standing in for socket

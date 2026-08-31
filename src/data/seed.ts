@@ -365,7 +365,7 @@ const users: User[] = [
 
 export function seedSnapshot(): DBSnapshot {
   return structuredClone({
-    schemaVersion: 2,
+    schemaVersion: 3,
     categories,
     items,
     modifierGroups,
@@ -373,13 +373,15 @@ export function seedSnapshot(): DBSnapshot {
     stations,
     tables,
     orders: [],
+    bills: [],
     users,
     settings: {
       cafeName: 'Swaada Café',
       taxLabel: 'GST',
       taxRatePercent: 5,
       currency: 'INR' as const,
+      askCustomerInfo: true,
     },
-    counters: { nextOrderNumber: 1042 },
+    counters: { nextOrderNumber: 1042, nextBillNumber: 501 },
   })
 }
