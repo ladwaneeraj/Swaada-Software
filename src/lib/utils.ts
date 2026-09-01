@@ -3,11 +3,13 @@ export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ')
 }
 
-const inr = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 })
+const inrWhole = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 })
+const inrPaise = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-/** ₹1,249 style formatting. */
+/** ₹1,249 for whole amounts, ₹1,249.50 (never .5) when paise are involved. */
 export function formatINR(amount: number): string {
-  return `₹${inr.format(round2(amount))}`
+  const v = round2(amount)
+  return `₹${Number.isInteger(v) ? inrWhole.format(v) : inrPaise.format(v)}`
 }
 
 export function round2(n: number): number {

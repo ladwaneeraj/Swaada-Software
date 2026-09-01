@@ -43,7 +43,9 @@ export function Toaster() {
   const toasts = useToasts((s) => s.toasts)
   const dismiss = useToasts((s) => s.dismiss)
   return (
-    <div className="pointer-events-none fixed right-4 top-4 z-[60] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2" aria-live="polite">
+    // Top-centre keeps toasts clear of sheet headers, the cart panel and the
+    // sidebar on every screen size.
+    <div className="pointer-events-none fixed left-1/2 top-4 z-[60] flex w-80 max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-col gap-2" aria-live="polite">
       {toasts.map((t) => (
         <button
           key={t.id}

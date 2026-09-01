@@ -1,5 +1,5 @@
-import { Check, ChefHat, HandPlatter, Timer } from 'lucide-react'
-import { useMemo } from 'react'
+import { Check, ChefHat, ChevronsRight, HandPlatter, Timer } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
 import { Badge, VegMark } from '@/components/ui'
 import { cn, elapsedLabel, minutesSince } from '@/lib/utils'
 import { useNow } from '@/lib/useNow'
@@ -157,20 +157,91 @@ function Ticket({ order, now, dark }: { order: Order; now: number; dark: boolean
           <div className="space-y-2">
             {order.readyAt && (
               <p className="text-center text-xs font-semibold text-ink-500">
-                Ready · waiting {elapsedLabel(order.readyAt, now)}
+                All items done · waiting {elapsedLabel(order.readyAt, now)}
               </p>
             )}
-            <button
-              type="button"
-              onClick={() => orderService.markDelivered(order.id)}
-              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-ok-600 text-sm font-bold uppercase tracking-wide text-white hover:opacity-90"
-            >
-              <HandPlatter className="size-5" /> Delivered to table
-            </button>
+            <SwipeToDeliver onDeliver={() => orderService.markDelivered(order.id)} />
           </div>
         )}
       </footer>
     </article>
+  )
+}
+
+/**
+ * Slide-to-confirm delivery. A deliberate gesture (drag the handle across)
+ * so a stray tap on a busy kitchen tablet can't mark food as delivered.
+ * Keyboard users press Enter on the handle instead.
+ */
+function SwipeToDeliver({ onDeliver }: { onDeliver: () => void }) {
+  const trackRef = useRef<HTMLDivElement>(null)
+  const startX = useRef(0)
+  const [x, setX] = useState(0)
+  const [dragging, setDragging] = useState(false)
+  const [done, setDone] = useState(false)
+
+  const THUMB = 44
+  const PAD = 4
+  const maxX = () => Math.max(0, (trackRef.current?.clientWidth ?? 0) - THUMB - PAD * 2)
+
+  const finish = () => {
+    setDone(true)
+    setX(maxX())
+    // Let the thumb land before the ticket leaves the board.
+    window.setTimeout(onDeliver, 180)
+  }
+
+  const onPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (done) return
+    e.currentTarget.setPointerCapture(e.pointerId)
+    startX.current = e.clientX - x
+    setDragging(true)
+  }
+  const onPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!dragging || done) return
+    setX(Math.min(Math.max(0, e.clientX - startX.current), maxX()))
+  }
+  const onPointerUp = () => {
+    if (!dragging || done) return
+    setDragging(false)
+    if (x >= maxX() * 0.8) finish()
+    else setX(0)
+  }
+
+  const progress = maxX() > 0 ? x / maxX() : 0
+
+  return (
+    <div
+      ref={trackRef}
+      className="relative h-13 select-none overflow-hidden rounded-full bg-ok-600"
+      style={{ padding: PAD }}
+    >
+      <span
+        className="pointer-events-none absolute inset-0 grid place-items-center text-sm font-bold uppercase tracking-wide text-white transition-opacity"
+        style={{ opacity: 1 - progress * 1.4 }}
+      >
+        Swipe to deliver
+        <ChevronsRight className="absolute right-4 size-5 animate-pulse" />
+      </span>
+      <button
+        type="button"
+        aria-label="Swipe right (or press Enter) to mark delivered"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onKeyDown={(e) => {
+          if ((e.key === 'Enter' || e.key === ' ') && !done) finish()
+        }}
+        className={cn(
+          'relative grid size-11 cursor-grab touch-none place-items-center rounded-full bg-white text-ok-600 shadow-card',
+          dragging ? 'cursor-grabbing' : 'transition-transform duration-200',
+        )}
+        style={{ transform: `translateX(${x}px)` }}
+      >
+        <HandPlatter className="size-5" />
+      </button>
+    </div>
   )
 }
 

@@ -16,6 +16,7 @@ import {
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { ConnectionBadge } from '@/components/ConnectionBadge'
+import { FullscreenButton } from '@/components/FullscreenButton'
 import { Toaster, useToasts } from '@/components/toast'
 import { cn } from '@/lib/utils'
 import { realtime } from '@/services/realtime'
@@ -90,7 +91,7 @@ export function AdminLayout() {
           expanded ? 'w-60' : 'w-[4.5rem]',
         )}
       >
-        <div className={cn('flex items-center py-5', expanded ? 'gap-3 px-5' : 'flex-col gap-2 px-3')}>
+        <div className={cn('flex shrink-0 items-center py-5', expanded ? 'gap-3 px-5' : 'flex-col gap-2 px-3')}>
           <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-ink-900" aria-hidden>
             <Coffee className="size-5 text-cream-100" />
           </div>
@@ -110,7 +111,8 @@ export function AdminLayout() {
             {expanded ? <PanelLeftClose className="size-[18px]" /> : <PanelLeftOpen className="size-[18px]" />}
           </button>
         </div>
-        <nav className={cn('flex-1 space-y-1', expanded ? 'px-3' : 'px-3.5')} aria-label="Main">
+        {/* Scrolls on short/zoomed screens so the footer never gets clipped */}
+        <nav className={cn('min-h-0 flex-1 space-y-1 overflow-y-auto pb-2', expanded ? 'px-3' : 'px-3.5')} aria-label="Main">
           {NAV.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
@@ -129,7 +131,7 @@ export function AdminLayout() {
             </NavLink>
           ))}
         </nav>
-        <div className={cn('border-t border-cream-200', expanded ? 'p-4' : 'flex flex-col items-center gap-2 py-4')}>
+        <div className={cn('shrink-0 border-t border-cream-200', expanded ? 'p-4' : 'flex flex-col items-center gap-2 py-4')}>
           {expanded ? (
             <>
               <div className="mb-3 flex items-center justify-between gap-2">
@@ -137,7 +139,10 @@ export function AdminLayout() {
                   <p className="truncate text-sm font-bold">{session?.name}</p>
                   <p className="text-xs capitalize text-ink-500">{session?.role}</p>
                 </div>
-                <ConnectionBadge />
+                <div className="flex items-center gap-1">
+                  <FullscreenButton />
+                  <ConnectionBadge />
+                </div>
               </div>
               <button
                 type="button"
@@ -149,6 +154,7 @@ export function AdminLayout() {
             </>
           ) : (
             <>
+              <FullscreenButton />
               <ConnectionBadge compact />
               <button
                 type="button"
@@ -177,6 +183,7 @@ export function AdminLayout() {
             </div>
             <div className="flex items-center gap-2">
               <ConnectionBadge />
+              <FullscreenButton />
               <button
                 type="button"
                 onClick={handleLogout}

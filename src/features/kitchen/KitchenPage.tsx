@@ -2,6 +2,7 @@ import { ChefHat, LogOut } from 'lucide-react'
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ConnectionBadge } from '@/components/ConnectionBadge'
+import { FullscreenButton } from '@/components/FullscreenButton'
 import { KitchenBoard } from '@/components/kitchen/KitchenBoard'
 import { Toaster, useToasts } from '@/components/toast'
 import { timeLabel } from '@/lib/utils'
@@ -50,6 +51,7 @@ export function KitchenPage() {
         <div className="flex items-center gap-3">
           <span className="text-sm font-bold tabular-nums text-cream-300">{timeLabel(new Date(now).toISOString())}</span>
           <ConnectionBadge dark />
+          <FullscreenButton dark />
           <button
             type="button"
             onClick={() => {
