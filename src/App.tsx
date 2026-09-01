@@ -3,6 +3,7 @@ import { AdminLayout } from '@/components/layout/AdminLayout'
 import { RequireRole, homeForRole } from '@/components/layout/RequireRole'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { AnalyticsPage } from '@/features/admin/AnalyticsPage'
+import { CustomersPage } from '@/features/admin/CustomersPage'
 import { DashboardPage } from '@/features/admin/DashboardPage'
 import { HistoryPage } from '@/features/admin/HistoryPage'
 import { KitchenMonitorPage } from '@/features/admin/KitchenMonitorPage'
@@ -38,6 +39,7 @@ export default function App() {
             <Route path="take-order/:tableId" element={<TakeOrderPage />} />
             <Route path="menu" element={<MenuPage />} />
             <Route path="kitchen" element={<KitchenMonitorPage />} />
+            <Route path="customers" element={<CustomersPage />} />
             <Route path="history" element={<HistoryPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="settings" element={<SettingsPage />} />

@@ -43,7 +43,7 @@ export function KitchenPage() {
             <ChefHat className="size-5 text-cream-100" />
           </div>
           <div>
-            <p className="text-lg font-bold tracking-tight text-white">Kitchen</p>
+            <p className="font-display text-xl font-semibold text-white">Kitchen</p>
             <p className="text-xs text-cream-400">{cafeName}</p>
           </div>
         </div>

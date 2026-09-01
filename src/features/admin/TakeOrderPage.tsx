@@ -451,7 +451,10 @@ function ProductCard({
   const unavailable = item.availability !== 'available'
   const customizable = item.modifierGroupIds.length > 0
   return (
-    <Card testId={`product-${item.id}`} className={cn('relative flex flex-col overflow-hidden', unavailable && 'opacity-60')}>
+    <Card
+      testId={`product-${item.id}`}
+      className={cn('group relative flex flex-col overflow-hidden transition-shadow hover:shadow-pop', unavailable && 'opacity-60')}
+    >
       <button
         type="button"
         onClick={onCustomize}
@@ -467,7 +470,10 @@ function ProductCard({
               loading="lazy"
               // Bundled illustrations sit inside the strip; real photos
               // (http URLs) fill it edge to edge.
-              className={cn('h-full w-full', item.image.startsWith('http') ? 'object-cover' : 'object-contain p-1 sm:p-1.5')}
+              className={cn(
+                'h-full w-full transition-transform duration-300 group-hover:scale-110',
+                item.image.startsWith('http') ? 'object-cover' : 'object-contain p-1 sm:p-1.5',
+              )}
             />
           ) : (
             <span>{categoryIcon}</span>

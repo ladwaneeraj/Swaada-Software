@@ -18,7 +18,8 @@ type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'success' | 
 type ButtonSize = 'sm' | 'md' | 'lg'
 
 const buttonVariants: Record<ButtonVariant, string> = {
-  primary: 'bg-accent-500 text-white hover:bg-accent-600 shadow-card',
+  primary:
+    'bg-gradient-to-b from-accent-500 to-accent-600 text-white shadow-card hover:from-accent-600 hover:to-accent-600',
   secondary:
     'bg-white text-ink-900 border border-cream-300 hover:border-cream-400 hover:bg-cream-50',
   ghost: 'bg-transparent text-ink-700 hover:bg-cream-200',
@@ -43,7 +44,8 @@ export function Button({ variant = 'primary', size = 'md', className, ...props }
     <button
       type="button"
       className={cn(
-        'inline-flex select-none items-center justify-center font-semibold transition-colors',
+        'inline-flex select-none items-center justify-center font-semibold transition-[color,background-color,border-color,transform,box-shadow]',
+        'active:scale-[0.97]',
         'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-500',
         'disabled:pointer-events-none disabled:opacity-45',
         buttonVariants[variant],
@@ -350,7 +352,7 @@ export function Stat({
       )}
       <div className="min-w-0">
         <p className="truncate text-[13px] font-semibold uppercase tracking-wide text-ink-500">{label}</p>
-        <p className="text-2xl font-bold tracking-tight">{value}</p>
+        <p className="font-display text-[1.75rem] font-semibold leading-tight tabular-nums">{value}</p>
         {sub && <p className="text-xs text-ink-500">{sub}</p>}
       </div>
     </Card>

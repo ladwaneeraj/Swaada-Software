@@ -1,6 +1,7 @@
 import { byDisplayOrder, nowISO, round2, uid } from '@/lib/utils'
 import type {
   Bill,
+  BillDiscount,
   CafeSettings,
   CafeTable,
   Category,
@@ -305,6 +306,25 @@ export const orderService = {
     })
   },
 
+  /**
+   * Void a DELIVERED round before settlement (wrong item, guest refused).
+   * Distinct from cancelOrder so the ordinary cancel path can't touch
+   * delivered food by accident; a reason is always recorded.
+   */
+  voidDeliveredRound(orderId: ID, reason: string): void {
+    db.mutate((draft) => {
+      const order = draft.orders.find((o) => o.id === orderId)
+      if (!order || order.status !== 'delivered') return
+      order.status = 'cancelled'
+      order.cancelledAt = nowISO()
+      order.cancelReason = `Voided: ${reason || 'no reason given'}`
+      order.items.forEach((i) => {
+        if (i.status !== 'ready') i.status = 'cancelled'
+      })
+      return { type: 'ORDER_CANCELLED', orderId }
+    })
+  },
+
   /** Called from the KITCHEN when the food is taken to the table. */
   markDelivered(orderId: ID): void {
     db.mutate((draft) => {
@@ -319,16 +339,114 @@ export const orderService = {
 
 /* ------------------------------- Billing -------------------------------- */
 
+export interface BillPreview {
+  subtotal: number
+  discountAmount: number
+  taxAmount: number
+  maxRedeemablePoints: number
+  pointsRedeemed: number
+  pointsValueRedeemed: number
+  total: number
+  pointsToEarn: number
+}
+
+/**
+ * The ONE place bill arithmetic lives: the settle sheet preview and the
+ * actual settlement both call this, so what the admin sees is what gets
+ * charged. Discount applies to the pre-tax subtotal (GST on the discounted
+ * value); loyalty points come off the payable total.
+ */
+export function computeBillPreview(input: {
+  rounds: Order[]
+  settings: CafeSettings
+  discount?: BillDiscount
+  redeemPoints?: number
+  availablePoints?: number
+  hasCustomer?: boolean
+}): BillPreview {
+  const { settings, discount } = input
+  const subtotal = round2(input.rounds.reduce((s, o) => s + o.subtotal, 0))
+  const discountAmount = discount
+    ? round2(
+        discount.type === 'percent'
+          ? (subtotal * Math.min(Math.max(discount.value, 0), 100)) / 100
+          : Math.min(Math.max(discount.value, 0), subtotal),
+      )
+    : 0
+  const taxable = subtotal - discountAmount
+  const taxAmount = round2((taxable * settings.taxRatePercent) / 100)
+  const preTotal = round2(taxable + taxAmount)
+
+  const { enabled, rupeesPerPoint, pointsPer100 } = settings.loyalty
+  const maxRedeemablePoints =
+    enabled && rupeesPerPoint > 0
+      ? Math.min(input.availablePoints ?? 0, Math.floor(preTotal / rupeesPerPoint))
+      : 0
+  const pointsRedeemed = Math.min(Math.max(0, Math.floor(input.redeemPoints ?? 0)), maxRedeemablePoints)
+  const pointsValueRedeemed = round2(pointsRedeemed * rupeesPerPoint)
+  const total = round2(preTotal - pointsValueRedeemed)
+  const pointsToEarn = enabled && input.hasCustomer ? Math.floor(total / 100) * pointsPer100 : 0
+
+  return { subtotal, discountAmount, taxAmount, maxRedeemablePoints, pointsRedeemed, pointsValueRedeemed, total, pointsToEarn }
+}
+
+/* Customer profiles are DERIVED from bills — no separate table to keep in
+   sync, and a real database can compute the same with one GROUP BY. */
+
+export interface CustomerProfile {
+  phone: string
+  name: string
+  visits: number
+  totalSpent: number
+  lastVisitAt: string
+  pointsEarned: number
+  pointsRedeemed: number
+  pointsBalance: number
+}
+
+export function customerProfiles(bills: Bill[]): CustomerProfile[] {
+  const byPhone = new Map<string, CustomerProfile>()
+  for (const bill of [...bills].sort((a, b) => a.settledAt.localeCompare(b.settledAt))) {
+    if (!bill.customerPhone) continue
+    const existing = byPhone.get(bill.customerPhone)
+    const profile: CustomerProfile = existing ?? {
+      phone: bill.customerPhone,
+      name: bill.customerName ?? 'Guest',
+      visits: 0,
+      totalSpent: 0,
+      lastVisitAt: bill.settledAt,
+      pointsEarned: 0,
+      pointsRedeemed: 0,
+      pointsBalance: 0,
+    }
+    profile.name = bill.customerName || profile.name
+    profile.visits += 1
+    profile.totalSpent = round2(profile.totalSpent + bill.total)
+    profile.lastVisitAt = bill.settledAt
+    profile.pointsEarned += bill.pointsEarned
+    profile.pointsRedeemed += bill.pointsRedeemed
+    profile.pointsBalance = profile.pointsEarned - profile.pointsRedeemed
+    byPhone.set(bill.customerPhone, profile)
+  }
+  return [...byPhone.values()].sort((a, b) => b.lastVisitAt.localeCompare(a.lastVisitAt))
+}
+
+export function customerByPhone(bills: Bill[], phone: string): CustomerProfile | undefined {
+  return customerProfiles(bills).find((c) => c.phone === phone)
+}
+
 export const billService = {
   /**
-   * Settle a table: group all of its delivered rounds into one Bill, mark
-   * them paid, and free the table. Refuses while any round is still with
-   * the kitchen (placed/preparing/ready).
+   * Settle a table: group all of its delivered rounds into one Bill (with
+   * optional discount and loyalty redemption), mark them paid, and free the
+   * table. Refuses while any round is still with the kitchen.
    */
   settleTable(input: {
     tableId: ID
     paymentMethod: PaymentMethod
     session: Session
+    discount?: BillDiscount
+    redeemPoints?: number
   }): Bill | null {
     let created: Bill | null = null
     db.mutate((draft) => {
@@ -337,6 +455,16 @@ export const billService = {
       const now = nowISO()
       const table = draft.tables.find((t) => t.id === input.tableId)
       const first = [...open].sort((a, b) => a.placedAt.localeCompare(b.placedAt))[0]
+      const phone = first?.customerPhone
+      const available = phone ? (customerByPhone(draft.bills, phone)?.pointsBalance ?? 0) : 0
+      const preview = computeBillPreview({
+        rounds: open,
+        settings: draft.settings,
+        discount: input.discount,
+        redeemPoints: input.redeemPoints,
+        availablePoints: available,
+        hasCustomer: Boolean(phone),
+      })
       const bill: Bill = {
         id: uid('bill'),
         billNumber: draft.counters.nextBillNumber,
@@ -345,12 +473,17 @@ export const billService = {
         orderIds: open.map((o) => o.id),
         orderNumbers: open.map((o) => o.orderNumber),
         customerName: first?.customerName,
-        customerPhone: first?.customerPhone,
-        subtotal: round2(open.reduce((s, o) => s + o.subtotal, 0)),
+        customerPhone: phone,
+        subtotal: preview.subtotal,
+        discount: preview.discountAmount > 0 ? input.discount : undefined,
+        discountAmount: preview.discountAmount,
         taxLabel: draft.settings.taxLabel,
         taxRatePercent: draft.settings.taxRatePercent,
-        taxAmount: round2(open.reduce((s, o) => s + o.taxAmount, 0)),
-        total: round2(open.reduce((s, o) => s + o.total, 0)),
+        taxAmount: preview.taxAmount,
+        pointsRedeemed: preview.pointsRedeemed,
+        pointsValueRedeemed: preview.pointsValueRedeemed,
+        pointsEarned: preview.pointsToEarn,
+        total: preview.total,
         paymentMethod: input.paymentMethod,
         settledAt: now,
         settledByUserId: input.session.userId,

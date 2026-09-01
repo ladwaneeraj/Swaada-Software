@@ -197,6 +197,11 @@ export interface Order {
 export const PAYMENT_METHODS = ['cash', 'upi'] as const
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number]
 
+export interface BillDiscount {
+  type: 'percent' | 'flat'
+  value: number
+}
+
 /** One settled sitting: all of a table's rounds paid together at the end. */
 export interface Bill {
   id: ID
@@ -207,10 +212,18 @@ export interface Bill {
   orderNumbers: number[]
   customerName?: string
   customerPhone?: string
+  /** Sum of round subtotals, before any adjustment. */
   subtotal: number
+  discount?: BillDiscount
+  discountAmount: number
   taxLabel: string
   taxRatePercent: number
   taxAmount: number
+  /** Loyalty points applied to this bill and their rupee value. */
+  pointsRedeemed: number
+  pointsValueRedeemed: number
+  /** Points earned by this bill (0 when loyalty is off or no phone). */
+  pointsEarned: number
   total: number
   paymentMethod: PaymentMethod
   settledAt: string
@@ -250,6 +263,13 @@ export interface CafeSettings {
   currency: 'INR'
   /** Ask for customer name & mobile on a table's first round (optional). */
   askCustomerInfo: boolean
+  loyalty: {
+    enabled: boolean
+    /** Points earned per ₹100 of the final bill. */
+    pointsPer100: number
+    /** Rupee value of one point at redemption. */
+    rupeesPerPoint: number
+  }
 }
 
 /* ------------------------------------------------------------------ */

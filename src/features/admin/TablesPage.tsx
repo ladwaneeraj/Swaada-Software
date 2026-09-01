@@ -1,15 +1,22 @@
-import { Pencil, Plus, ReceiptIndianRupee, User, Users } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { Pencil, Plus, ReceiptIndianRupee, Sparkles, User, Users } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/layout/AdminLayout'
 import { useToasts } from '@/components/toast'
-import { Badge, Button, Field, Input, Modal, Toggle } from '@/components/ui'
+import { Badge, Button, Field, Input, Modal, Textarea, Toggle } from '@/components/ui'
 import { ORDER_STATUS_META, PAYMENT_METHOD_META } from '@/lib/statusMeta'
 import { byDisplayOrder, cn, elapsedLabel, formatINR } from '@/lib/utils'
 import { useNow } from '@/lib/useNow'
-import { activeOrdersForTable, billService, tableService } from '@/services'
+import {
+  activeOrdersForTable,
+  billService,
+  computeBillPreview,
+  customerByPhone,
+  orderService,
+  tableService,
+} from '@/services'
 import { useAppStore } from '@/store/useAppStore'
-import type { CafeTable, Order, PaymentMethod } from '@/types'
+import type { BillDiscount, CafeTable, Order, PaymentMethod } from '@/types'
 import { PAYMENT_METHODS } from '@/types'
 
 /**
@@ -147,30 +154,72 @@ export function TablesPage() {
 
 /* ----------------------------- Running bill ------------------------------ */
 
+type DiscountChoice = 'none' | '5' | '10' | '15' | 'flat'
+
 function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose: () => void }) {
   const tables = useAppStore((s) => s.db.tables)
   const orders = useAppStore((s) => s.db.orders)
+  const bills = useAppStore((s) => s.db.bills)
+  const settings = useAppStore((s) => s.db.settings)
   const session = useAppStore((s) => s.session)
   const navigate = useNavigate()
   const pushToast = useToasts((s) => s.push)
+
   const [payment, setPayment] = useState<PaymentMethod>('cash')
+  const [discountChoice, setDiscountChoice] = useState<DiscountChoice>('none')
+  const [flatValue, setFlatValue] = useState('')
+  const [redeem, setRedeem] = useState(false)
+  const [voiding, setVoiding] = useState<Order | null>(null)
+  const [voidReason, setVoidReason] = useState('')
+
+  // Fresh sheet per table opening.
+  useEffect(() => {
+    setPayment('cash')
+    setDiscountChoice('none')
+    setFlatValue('')
+    setRedeem(false)
+    setVoiding(null)
+    setVoidReason('')
+  }, [tableId])
 
   const table = tables.find((t) => t.id === tableId)
   const rounds = table ? activeOrdersForTable(orders, table.id) : []
   const first = rounds[0]
 
-  const subtotal = rounds.reduce((s, o) => s + o.subtotal, 0)
-  const taxAmount = rounds.reduce((s, o) => s + o.taxAmount, 0)
-  const total = rounds.reduce((s, o) => s + o.total, 0)
+  const discount: BillDiscount | undefined =
+    discountChoice === 'none'
+      ? undefined
+      : discountChoice === 'flat'
+        ? { type: 'flat', value: Number(flatValue) || 0 }
+        : { type: 'percent', value: Number(discountChoice) }
+
+  const profile = first?.customerPhone ? customerByPhone(bills, first.customerPhone) : undefined
+  const availablePoints = profile?.pointsBalance ?? 0
+
+  const preview = computeBillPreview({
+    rounds,
+    settings,
+    discount,
+    redeemPoints: redeem ? availablePoints : 0,
+    availablePoints,
+    hasCustomer: Boolean(first?.customerPhone),
+  })
+
   const pendingInKitchen = rounds.filter((o) => o.status !== 'delivered')
   const canSettle = rounds.length > 0 && pendingInKitchen.length === 0
 
   const settle = () => {
     if (!table || !session || !canSettle) return
-    const bill = billService.settleTable({ tableId: table.id, paymentMethod: payment, session })
+    const bill = billService.settleTable({
+      tableId: table.id,
+      paymentMethod: payment,
+      session,
+      discount,
+      redeemPoints: redeem ? availablePoints : 0,
+    })
     if (bill) {
       pushToast(
-        `Bill #${bill.billNumber} · ${formatINR(bill.total)} paid by ${PAYMENT_METHOD_META[bill.paymentMethod].label} · ${table.name} is free`,
+        `Bill #${bill.billNumber} · ${formatINR(bill.total)} by ${PAYMENT_METHOD_META[bill.paymentMethod].label}${bill.pointsEarned > 0 ? ` · +${bill.pointsEarned} pts` : ''} · ${table.name} is free`,
         'ok',
       )
       onClose()
@@ -185,22 +234,100 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
       position="sheet"
       footer={
         <div className="space-y-3">
-          <div className="flex justify-between text-sm text-ink-500">
-            <span>Subtotal</span>
-            <span className="tabular-nums">{formatINR(subtotal)}</span>
-          </div>
-          <div className="flex justify-between text-sm text-ink-500">
-            <span>
-              {first?.taxLabel ?? 'Tax'} ({first?.taxRatePercent ?? 0}%)
-            </span>
-            <span className="tabular-nums">{formatINR(taxAmount)}</span>
-          </div>
-          <div className="flex justify-between text-lg font-bold">
-            <span>To pay</span>
-            <span className="tabular-nums">{formatINR(total)}</span>
+          {/* Discount */}
+          <div className="flex items-center gap-1.5" role="radiogroup" aria-label="Discount">
+            <span className="mr-1 text-xs font-bold uppercase tracking-wide text-ink-500">Discount</span>
+            {(['none', '5', '10', '15'] as const).map((c) => (
+              <button
+                key={c}
+                type="button"
+                role="radio"
+                aria-checked={discountChoice === c}
+                onClick={() => setDiscountChoice(c)}
+                className={cn(
+                  'h-8 rounded-lg px-2.5 text-xs font-bold transition-colors',
+                  discountChoice === c ? 'bg-ink-900 text-white' : 'bg-cream-100 text-ink-700 hover:bg-cream-200',
+                )}
+              >
+                {c === 'none' ? 'None' : `${c}%`}
+              </button>
+            ))}
+            <button
+              type="button"
+              role="radio"
+              aria-checked={discountChoice === 'flat'}
+              onClick={() => setDiscountChoice('flat')}
+              className={cn(
+                'h-8 rounded-lg px-2.5 text-xs font-bold transition-colors',
+                discountChoice === 'flat' ? 'bg-ink-900 text-white' : 'bg-cream-100 text-ink-700 hover:bg-cream-200',
+              )}
+            >
+              ₹
+            </button>
+            {discountChoice === 'flat' && (
+              <input
+                type="number"
+                min={0}
+                value={flatValue}
+                onChange={(e) => setFlatValue(e.target.value)}
+                aria-label="Flat discount amount"
+                className="h-8 w-20 rounded-lg border border-cream-300 px-2 text-sm tabular-nums focus:border-accent-500 focus:outline-none"
+              />
+            )}
           </div>
 
-          {/* Payment method — shown when payment is being taken */}
+          {/* Loyalty redemption */}
+          {settings.loyalty.enabled && availablePoints > 0 && (
+            <button
+              type="button"
+              onClick={() => setRedeem((r) => !r)}
+              aria-pressed={redeem}
+              className={cn(
+                'flex w-full items-center justify-between rounded-xl border-2 px-3 py-2 text-sm font-semibold transition-colors',
+                redeem ? 'border-ok-600 bg-ok-100 text-ok-600' : 'border-cream-300 bg-white text-ink-700 hover:border-cream-400',
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <Sparkles className="size-4" /> Redeem {preview.maxRedeemablePoints} pts
+              </span>
+              <span className="tabular-nums">−{formatINR(preview.maxRedeemablePoints * settings.loyalty.rupeesPerPoint)}</span>
+            </button>
+          )}
+
+          {/* Totals */}
+          <div className="space-y-1 text-sm">
+            <div className="flex justify-between text-ink-500">
+              <span>Subtotal</span>
+              <span className="tabular-nums">{formatINR(preview.subtotal)}</span>
+            </div>
+            {preview.discountAmount > 0 && (
+              <div className="flex justify-between font-semibold text-ok-600">
+                <span>Discount</span>
+                <span className="tabular-nums">−{formatINR(preview.discountAmount)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-ink-500">
+              <span>
+                {settings.taxLabel} ({settings.taxRatePercent}%)
+              </span>
+              <span className="tabular-nums">{formatINR(preview.taxAmount)}</span>
+            </div>
+            {preview.pointsValueRedeemed > 0 && (
+              <div className="flex justify-between font-semibold text-ok-600">
+                <span>Points ({preview.pointsRedeemed})</span>
+                <span className="tabular-nums">−{formatINR(preview.pointsValueRedeemed)}</span>
+              </div>
+            )}
+            <div className="flex justify-between pt-1 text-lg font-bold">
+              <span>To pay</span>
+              <span className="tabular-nums">{formatINR(preview.total)}</span>
+            </div>
+            {preview.pointsToEarn > 0 && (
+              <p className="text-right text-xs font-semibold text-accent-600">earns +{preview.pointsToEarn} pts</p>
+            )}
+          </div>
+
+          {/* Payment method */}
           <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Payment method">
             {PAYMENT_METHODS.map((m) => (
               <button
@@ -222,7 +349,7 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
           </div>
 
           <Button size="lg" className="w-full" disabled={!canSettle} onClick={settle}>
-            <ReceiptIndianRupee className="size-5" /> Take payment · {formatINR(total)}
+            <ReceiptIndianRupee className="size-5" /> Take payment · {formatINR(preview.total)}
           </Button>
           {!canSettle && rounds.length > 0 && (
             <p className="text-center text-xs font-semibold text-warn-600">
@@ -234,10 +361,15 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
       }
     >
       {first?.customerName && (
-        <p className="mb-3 flex items-center gap-2 text-sm font-semibold">
+        <p className="mb-1 flex items-center gap-2 text-sm font-semibold">
           <User className="size-4 text-ink-300" />
           {first.customerName}
           {first.customerPhone && <span className="font-normal text-ink-500">· {first.customerPhone}</span>}
+        </p>
+      )}
+      {profile && settings.loyalty.enabled && (
+        <p className="mb-3 text-xs text-ink-500">
+          {profile.visits} previous visit{profile.visits > 1 ? 's' : ''} · {availablePoints} pts balance
         </p>
       )}
 
@@ -254,14 +386,47 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
 
       <div className="space-y-3">
         {rounds.map((round, i) => (
-          <RoundCard key={round.id} round={round} index={i + 1} />
+          <RoundCard key={round.id} round={round} index={i + 1} onVoid={() => setVoiding(round)} />
         ))}
       </div>
+
+      {/* Void a delivered round (reason recorded) */}
+      <Modal
+        open={voiding !== null}
+        onClose={() => setVoiding(null)}
+        title={voiding ? `Void round #${voiding.orderNumber}?` : 'Void round'}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setVoiding(null)}>
+              Keep
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                if (!voiding) return
+                orderService.voidDeliveredRound(voiding.id, voidReason.trim())
+                pushToast(`Round #${voiding.orderNumber} voided`, 'warn')
+                setVoiding(null)
+                setVoidReason('')
+              }}
+            >
+              Void round
+            </Button>
+          </div>
+        }
+      >
+        <p className="mb-3 text-sm text-ink-500">
+          Removes this round from the bill. The order stays in history as cancelled, with the reason.
+        </p>
+        <Field label="Reason">
+          <Textarea value={voidReason} onChange={(e) => setVoidReason(e.target.value)} placeholder="e.g. Wrong item served" />
+        </Field>
+      </Modal>
     </Modal>
   )
 }
 
-function RoundCard({ round, index }: { round: Order; index: number }) {
+function RoundCard({ round, index, onVoid }: { round: Order; index: number; onVoid: () => void }) {
   const meta = ORDER_STATUS_META[round.status]
   return (
     <div className="rounded-xl border border-cream-200 p-3">
@@ -279,7 +444,16 @@ function RoundCard({ round, index }: { round: Order; index: number }) {
           .map((i) => `${i.quantity}× ${i.name}`)
           .join(', ')}
       </p>
-      <p className="mt-1.5 text-right text-sm font-bold tabular-nums">{formatINR(round.total)}</p>
+      <div className="mt-1.5 flex items-center justify-between">
+        {round.status === 'delivered' ? (
+          <button type="button" onClick={onVoid} className="text-xs font-semibold text-danger-600 hover:underline">
+            Void round
+          </button>
+        ) : (
+          <span />
+        )}
+        <p className="text-right text-sm font-bold tabular-nums">{formatINR(round.total)}</p>
+      </div>
     </div>
   )
 }

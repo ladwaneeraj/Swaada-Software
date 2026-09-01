@@ -50,12 +50,12 @@ export function LoginPage() {
           <p className="text-lg font-bold tracking-tight">{cafeName}</p>
         </div>
         <div>
-          <h1 className="max-w-md text-4xl font-bold leading-tight tracking-tight">
-            One system for the floor and the kitchen.
+          <h1 className="font-display max-w-md text-[2.75rem] font-medium leading-[1.15]">
+            One system for the floor <em className="text-accent-100">and</em> the kitchen.
           </h1>
           <p className="mt-4 max-w-sm text-cream-300">
             Take orders in seconds, route them to the right station, and watch
-            them move from placed to served in real time.
+            them move from placed to paid in real time.
           </p>
         </div>
         <p className="text-sm text-cream-400">Prototype build · mock data, no backend yet</p>
@@ -67,7 +67,7 @@ export function LoginPage() {
       <div className="flex items-center justify-center p-6">
         <div className="w-full max-w-sm">
           <div className="mb-8 text-center lg:text-left">
-            <h2 className="text-2xl font-bold tracking-tight">Sign in</h2>
+            <h2 className="font-display text-3xl font-semibold">Sign in</h2>
             <p className="mt-1 text-sm text-ink-500">Choose your role, then enter your PIN.</p>
           </div>
 

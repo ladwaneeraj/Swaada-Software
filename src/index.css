@@ -30,12 +30,13 @@
   --color-danger-600: #b3261e;
   --color-danger-100: #fbe4e2;
 
-  --font-sans: 'Inter', ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Fraunces Variable', Georgia, 'Times New Roman', serif;
 
-  --shadow-card: 0 1px 2px rgb(34 28 23 / 0.05), 0 4px 12px rgb(34 28 23 / 0.06);
-  --shadow-pop: 0 4px 8px rgb(34 28 23 / 0.08), 0 12px 32px rgb(34 28 23 / 0.14);
+  --shadow-card: 0 1px 2px rgb(34 28 23 / 0.05), 0 4px 14px rgb(34 28 23 / 0.07);
+  --shadow-pop: 0 4px 10px rgb(34 28 23 / 0.08), 0 16px 40px rgb(34 28 23 / 0.16);
 
-  --radius-card: 0.875rem;
+  --radius-card: 1rem;
 }
 
 html {
@@ -77,3 +78,11 @@ body {
     animation: none;
   }
 }
+
+/* Display face for headings and hero numbers */
+.font-display {
+  font-family: var(--font-display);
+  font-variation-settings: 'opsz' 40;
+  letter-spacing: -0.01em;
+}
+

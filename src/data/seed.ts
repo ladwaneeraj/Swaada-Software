@@ -406,7 +406,7 @@ const users: User[] = [
 
 export function seedSnapshot(): DBSnapshot {
   return structuredClone({
-    schemaVersion: 4,
+    schemaVersion: 5,
     categories,
     items,
     modifierGroups,
@@ -422,6 +422,11 @@ export function seedSnapshot(): DBSnapshot {
       taxRatePercent: 5,
       currency: 'INR' as const,
       askCustomerInfo: true,
+      loyalty: {
+        enabled: true,
+        pointsPer100: 5,
+        rupeesPerPoint: 1,
+      },
     },
     counters: { nextOrderNumber: 1042, nextBillNumber: 501 },
   })

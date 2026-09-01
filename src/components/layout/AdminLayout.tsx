@@ -9,6 +9,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
+  UsersRound,
   UtensilsCrossed,
   BookOpenText,
 } from 'lucide-react'
@@ -26,6 +27,7 @@ const NAV = [
   { to: '/admin/orders', label: 'Orders', icon: ClipboardList },
   { to: '/admin/menu', label: 'Menu', icon: BookOpenText },
   { to: '/admin/kitchen', label: 'Kitchen', icon: ChefHat },
+  { to: '/admin/customers', label: 'Customers', icon: UsersRound },
   { to: '/admin/history', label: 'History', icon: History },
   { to: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/admin/settings', label: 'Settings', icon: Settings },
@@ -226,7 +228,7 @@ export function PageHeader({
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+        <h1 className="font-display text-[1.75rem] font-semibold leading-tight">{title}</h1>
         {sub && <p className="mt-0.5 text-sm text-ink-500">{sub}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
