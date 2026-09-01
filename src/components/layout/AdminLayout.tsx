@@ -6,11 +6,13 @@ import {
   History,
   LayoutDashboard,
   LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   UtensilsCrossed,
   BookOpenText,
 } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { ConnectionBadge } from '@/components/ConnectionBadge'
 import { Toaster, useToasts } from '@/components/toast'
@@ -29,12 +31,33 @@ const NAV = [
   { to: '/admin/settings', label: 'Settings', icon: Settings },
 ]
 
+const SIDEBAR_KEY = 'swaada.ui.sidebarExpanded'
+
 export function AdminLayout() {
   const session = useAppStore((s) => s.session)
   const logout = useAppStore((s) => s.logout)
   const cafeName = useAppStore((s) => s.db.settings.cafeName)
   const navigate = useNavigate()
   const pushToast = useToasts((s) => s.push)
+
+  // Icon rail by default for maximum working space; the choice sticks.
+  const [expanded, setExpanded] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const toggleSidebar = () => {
+    setExpanded((prev) => {
+      try {
+        localStorage.setItem(SIDEBAR_KEY, prev ? '0' : '1')
+      } catch {
+        /* ignore */
+      }
+      return !prev
+    })
+  }
 
   // Surface kitchen progress to the admin without them watching the screen.
   useEffect(() => {
@@ -58,49 +81,84 @@ export function AdminLayout() {
 
   return (
     <div className="flex min-h-dvh">
-      {/* Sidebar (desktop) */}
-      <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-cream-200 bg-white lg:flex">
-        <div className="flex items-center gap-3 px-5 py-5">
-          <div className="grid size-10 place-items-center rounded-xl bg-ink-900" aria-hidden>
+      {/* Sidebar (desktop): icon rail by default, expandable when needed */}
+      <aside
+        className={cn(
+          'sticky top-0 hidden h-dvh shrink-0 flex-col border-r border-cream-200 bg-white transition-[width] duration-200 lg:flex',
+          expanded ? 'w-60' : 'w-[4.5rem]',
+        )}
+      >
+        <div className={cn('flex items-center py-5', expanded ? 'gap-3 px-5' : 'flex-col gap-2 px-3')}>
+          <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-ink-900" aria-hidden>
             <Coffee className="size-5 text-cream-100" />
           </div>
-          <div>
-            <p className="text-[15px] font-bold leading-tight tracking-tight">{cafeName}</p>
-            <p className="text-xs text-ink-500">Admin</p>
-          </div>
+          {expanded && (
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[15px] font-bold leading-tight tracking-tight">{cafeName}</p>
+              <p className="text-xs text-ink-500">Admin</p>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
+            aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
+            className="grid size-9 shrink-0 place-items-center rounded-lg text-ink-500 hover:bg-cream-100 hover:text-ink-900"
+          >
+            {expanded ? <PanelLeftClose className="size-[18px]" /> : <PanelLeftOpen className="size-[18px]" />}
+          </button>
         </div>
-        <nav className="flex-1 space-y-1 px-3" aria-label="Main">
+        <nav className={cn('flex-1 space-y-1', expanded ? 'px-3' : 'px-3.5')} aria-label="Main">
           {NAV.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
+              title={label}
               className={({ isActive }) =>
                 cn(
-                  'flex h-11 items-center gap-3 rounded-xl px-3 text-sm font-semibold transition-colors',
+                  'flex h-11 items-center rounded-xl text-sm font-semibold transition-colors',
+                  expanded ? 'gap-3 px-3' : 'justify-center',
                   isActive ? 'bg-accent-50 text-accent-600' : 'text-ink-700 hover:bg-cream-100',
                 )
               }
             >
-              <Icon className="size-[18px]" />
-              {label}
+              <Icon className="size-[18px] shrink-0" />
+              {expanded && label}
             </NavLink>
           ))}
         </nav>
-        <div className="border-t border-cream-200 p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-bold">{session?.name}</p>
-              <p className="text-xs capitalize text-ink-500">{session?.role}</p>
-            </div>
-            <ConnectionBadge />
-          </div>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-cream-300 text-sm font-semibold text-ink-700 hover:bg-cream-100"
-          >
-            <LogOut className="size-4" /> Log out
-          </button>
+        <div className={cn('border-t border-cream-200', expanded ? 'p-4' : 'flex flex-col items-center gap-2 py-4')}>
+          {expanded ? (
+            <>
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold">{session?.name}</p>
+                  <p className="text-xs capitalize text-ink-500">{session?.role}</p>
+                </div>
+                <ConnectionBadge />
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-cream-300 text-sm font-semibold text-ink-700 hover:bg-cream-100"
+              >
+                <LogOut className="size-4" /> Log out
+              </button>
+            </>
+          ) : (
+            <>
+              <ConnectionBadge compact />
+              <button
+                type="button"
+                onClick={handleLogout}
+                title="Log out"
+                aria-label="Log out"
+                className="grid size-9 place-items-center rounded-lg text-ink-500 hover:bg-cream-100 hover:text-ink-900"
+              >
+                <LogOut className="size-4" />
+              </button>
+            </>
+          )}
         </div>
       </aside>
 

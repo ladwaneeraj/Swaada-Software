@@ -27,7 +27,7 @@ import {
   VegMark,
 } from '@/components/ui'
 import { AVAILABILITY_META } from '@/lib/statusMeta'
-import { byDisplayOrder, cn, formatINR } from '@/lib/utils'
+import { assetUrl, byDisplayOrder, cn, formatINR } from '@/lib/utils'
 import { menuService, searchMenu, type CategoryInput, type MenuItemInput } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
 import type { Category, ID, ItemAvailability, MenuItem } from '@/types'
@@ -214,6 +214,9 @@ function ItemRow({
       </td>
       <td className="px-3 py-2.5">
         <div className="flex items-center gap-2">
+          {item.image && (
+            <img src={assetUrl(item.image)} alt="" loading="lazy" className="size-8 shrink-0 rounded-lg bg-cream-100 object-contain p-0.5" />
+          )}
           <VegMark isVeg={item.isVegetarian} className="size-3.5" />
           <span className="font-semibold">{item.name}</span>
           {item.isPopular && <Badge tone="accent">Popular</Badge>}
@@ -270,6 +273,7 @@ function ItemEditor({ item, onClose }: { item: MenuItem | null; onClose: () => v
           categoryId: item.categoryId,
           name: item.name,
           description: item.description,
+          image: item.image ?? null,
           basePrice: item.basePrice,
           availability: item.availability,
           isVegetarian: item.isVegetarian,
@@ -284,6 +288,7 @@ function ItemEditor({ item, onClose }: { item: MenuItem | null; onClose: () => v
           categoryId: firstCategory?.id ?? '',
           name: '',
           description: '',
+          image: null,
           basePrice: 0,
           availability: 'available',
           isVegetarian: true,
@@ -377,6 +382,13 @@ function ItemEditor({ item, onClose }: { item: MenuItem | null; onClose: () => v
         </Field>
         <Field label="Search keywords" hint="Comma-separated, e.g. coffee — helps search find this item">
           <Input value={tagsText} onChange={(e) => setTagsText(e.target.value)} placeholder="coffee, latte" />
+        </Field>
+        <Field label="Image" hint="Bundled illustration (/menu/….svg) or a full photo URL; empty shows the category icon">
+          <Input
+            value={form.image ?? ''}
+            onChange={(e) => patch({ image: e.target.value.trim() || null })}
+            placeholder="/menu/sandwich.svg or https://…"
+          />
         </Field>
         <Field label="Kitchen station" hint="Where this item is prepared — used for routing">
           <Select value={form.stationId} onChange={(e) => patch({ stationId: e.target.value })}>

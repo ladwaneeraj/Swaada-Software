@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useToasts } from '@/components/toast'
 import { Badge, Button, Card, Input, Modal, Textarea, VegMark } from '@/components/ui'
-import { byDisplayOrder, cn, formatINR } from '@/lib/utils'
+import { assetUrl, byDisplayOrder, cn, formatINR } from '@/lib/utils'
 import {
   itemsForCategory,
   optionsForGroup,
@@ -292,7 +292,7 @@ export function TakeOrderPage() {
         {visibleItems.length === 0 ? (
           <p className="py-16 text-center text-sm text-ink-500">No items match “{query}”.</p>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(8.25rem,1fr))] gap-2 sm:grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] sm:gap-3">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(8.25rem,1fr))] gap-2 sm:grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] sm:gap-3">
             {visibleItems.map((item) => (
               <ProductCard
                 key={item.id}
@@ -314,7 +314,9 @@ export function TakeOrderPage() {
 
       {/* ---------------------------- Cart side ---------------------------- */}
       <aside className="hidden w-96 shrink-0 xl:block">
-        <div className="sticky top-6">
+        {/* Capped to the viewport so the Place order button is always visible;
+            only the items list scrolls. */}
+        <div className="sticky top-6 max-h-[calc(100dvh-3rem)]">
           <CartPanel
             lines={lines}
             tableName={table.name}
@@ -457,9 +459,16 @@ function ProductCard({
         className="flex flex-1 flex-col text-left"
         aria-label={customizable ? `Customize ${item.name}` : item.name}
       >
-        <div className="relative flex h-12 items-center justify-center bg-gradient-to-br from-cream-100 to-cream-200 text-2xl sm:h-20 sm:text-4xl" aria-hidden>
+        <div className="relative flex h-14 items-center justify-center bg-gradient-to-br from-cream-100 to-cream-200 text-2xl sm:h-24 sm:text-4xl" aria-hidden>
           {item.image ? (
-            <img src={item.image} alt="" className="h-full w-full object-cover" />
+            <img
+              src={assetUrl(item.image)}
+              alt=""
+              loading="lazy"
+              // Bundled illustrations sit inside the strip; real photos
+              // (http URLs) fill it edge to edge.
+              className={cn('h-full w-full', item.image.startsWith('http') ? 'object-cover' : 'object-contain p-1 sm:p-1.5')}
+            />
           ) : (
             <span>{categoryIcon}</span>
           )}
@@ -468,13 +477,14 @@ function ProductCard({
             {item.isRecommended && <Badge tone="ok">Pick</Badge>}
           </div>
         </div>
+        {/* Deliberately no description here — cards stay short so orders go
+            in fast. The description shows in the customize sheet instead. */}
         <div className="flex flex-1 flex-col p-2 sm:p-3">
           <p className="flex items-start gap-1.5 text-[13px] font-bold leading-snug sm:text-sm">
             <VegMark isVeg={item.isVegetarian} className="mt-0.5 size-3.5 sm:size-4" />
             {item.name}
           </p>
-          <p className="mt-1 line-clamp-2 text-xs text-ink-500 max-sm:hidden">{item.description}</p>
-          <p className="mt-auto pt-1.5 text-[13px] font-bold tabular-nums sm:pt-2 sm:text-sm">
+          <p className="mt-auto pt-1.5 text-[13px] font-bold tabular-nums sm:text-sm">
             {hasPricedSize && <span className="font-normal text-ink-500">from </span>}
             {formatINR(item.basePrice)}
           </p>
@@ -549,7 +559,7 @@ function CartPanel({
           <p className="text-xs text-ink-500">{lines.length === 0 ? 'No items yet' : `${lines.reduce((n, l) => n + l.quantity, 0)} items`}</p>
         </div>
       )}
-      <div className={cn('flex-1 overflow-y-auto', bare ? '' : 'max-h-[45vh] px-5', 'py-2')}>
+      <div className={cn('min-h-0 flex-1 overflow-y-auto py-2', !bare && 'px-5')}>
         {lines.length === 0 ? (
           <p className="py-10 text-center text-sm text-ink-500">Tap items on the left to build the order.</p>
         ) : (
@@ -616,7 +626,9 @@ function CartPanel({
     </>
   )
   if (bare) return <div className="flex flex-col">{body}</div>
-  return <Card className="flex flex-col overflow-hidden">{body}</Card>
+  // Capped to the viewport (it sits in a sticky sidebar) so the totals and
+  // Place order button never scroll out of reach; only the item list scrolls.
+  return <Card className="flex max-h-[calc(100dvh-3rem)] flex-col overflow-hidden">{body}</Card>
 }
 
 /* --------------------------- Customization sheet -------------------------- */

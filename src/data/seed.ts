@@ -132,13 +132,54 @@ interface CategoryDefaults {
   mods: ID[]
 }
 
+/**
+ * Bundled flat illustrations (public/menu/*.svg) assigned per item. This is
+ * plain data on the item's `image` field — swap any entry for a real photo
+ * URL (or edit it in Menu management) and the UI picks it up unchanged.
+ */
+const ITEM_IMAGES: Record<string, string[]> = {
+  chai: ['itm-tea', 'itm-masala-tea', 'itm-ginger-tea', 'itm-black-tea'],
+  'tea-cup': ['itm-green-tea', 'itm-lemon-tea'],
+  'filter-coffee': ['itm-coffee', 'itm-filter-coffee'],
+  espresso: ['itm-espresso'],
+  cappuccino: ['itm-cappuccino', 'itm-cafe-latte', 'itm-cafe-mocha'],
+  'hot-chocolate': ['itm-hot-chocolate'],
+  'cold-coffee': ['itm-cold-coffee', 'itm-iced-coffee', 'itm-cold-chocolate'],
+  'iced-tea': ['itm-iced-tea'],
+  soda: ['itm-lemon-soda', 'itm-sweet-lime-soda'],
+  mojito: ['itm-mint-cooler', 'itm-mojito'],
+  milkshake: ['itm-milkshake'],
+  'juice-orange': ['itm-orange-juice', 'itm-mosambi-juice', 'itm-pineapple-juice', 'itm-mixed-fruit-juice', 'itm-carrot-juice'],
+  'juice-red': ['itm-watermelon-juice', 'itm-pomegranate-juice', 'itm-grape-juice'],
+  sandwich: ['itm-veg-sandwich', 'itm-cheese-sandwich', 'itm-grilled-sandwich', 'itm-club-sandwich', 'itm-paneer-sandwich', 'itm-corn-cheese-sandwich', 'itm-chicken-sandwich', 'itm-chicken-club-sandwich'],
+  wrap: ['itm-veg-wrap', 'itm-paneer-wrap', 'itm-mexican-wrap', 'itm-cheese-wrap', 'itm-chicken-wrap', 'itm-chicken-tikka-wrap'],
+  pizza: ['itm-margherita-pizza', 'itm-veg-pizza', 'itm-paneer-pizza', 'itm-farmhouse-pizza', 'itm-corn-cheese-pizza', 'itm-chicken-pizza', 'itm-chicken-tikka-pizza'],
+  pasta: ['itm-white-sauce-pasta', 'itm-red-sauce-pasta', 'itm-pink-sauce-pasta', 'itm-alfredo-pasta', 'itm-arrabbiata-pasta', 'itm-veg-pasta', 'itm-paneer-pasta', 'itm-chicken-pasta'],
+  fries: ['itm-french-fries', 'itm-peri-peri-fries', 'itm-cheese-fries', 'itm-potato-wedges'],
+  'garlic-bread': ['itm-garlic-bread', 'itm-cheese-garlic-bread'],
+  nachos: ['itm-nachos', 'itm-cheese-nachos'],
+  snacks: ['itm-onion-rings', 'itm-veg-nuggets', 'itm-chicken-nuggets', 'itm-chicken-popcorn'],
+  burger: ['itm-veg-burger', 'itm-cheese-burger', 'itm-paneer-burger', 'itm-crispy-chicken-burger', 'itm-chicken-cheese-burger'],
+  salad: ['itm-veg-salad', 'itm-chicken-salad', 'itm-corn-salad', 'itm-paneer-salad'],
+  'fruit-bowl': ['itm-fruit-bowl', 'itm-fruit-cream'],
+  brownie: ['itm-brownie', 'itm-brownie-icecream'],
+  cake: ['itm-chocolate-cake', 'itm-pastry'],
+  cheesecake: ['itm-cheesecake'],
+  'ice-cream': ['itm-ice-cream', 'itm-sundae'],
+}
+
+const imageByItemId = new Map<string, string>()
+for (const [img, ids] of Object.entries(ITEM_IMAGES)) {
+  ids.forEach((id) => imageByItemId.set(id, `/menu/${img}.svg`))
+}
+
 function buildItems(categoryId: ID, defaults: CategoryDefaults, seeds: ItemSeed[]): MenuItem[] {
   return seeds.map((s, i) => ({
     id: s.id,
     categoryId,
     name: s.name,
     description: s.desc,
-    image: null,
+    image: imageByItemId.get(s.id) ?? null,
     basePrice: s.price,
     availability: s.availability ?? 'available',
     isVegetarian: s.veg ?? true,
@@ -365,7 +406,7 @@ const users: User[] = [
 
 export function seedSnapshot(): DBSnapshot {
   return structuredClone({
-    schemaVersion: 3,
+    schemaVersion: 4,
     categories,
     items,
     modifierGroups,

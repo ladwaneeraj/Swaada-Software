@@ -87,6 +87,8 @@ export interface MenuItemInput {
   categoryId: ID
   name: string
   description: string
+  /** Bundled illustration path or a full photo URL; null shows the category icon. */
+  image: string | null
   basePrice: number
   availability: ItemAvailability
   isVegetarian: boolean
@@ -152,7 +154,6 @@ export const menuService = {
       draft.items.push({
         id: uid('itm'),
         ...input,
-        image: null,
         displayOrder: maxOrder + 1,
         createdAt: nowISO(),
         updatedAt: nowISO(),

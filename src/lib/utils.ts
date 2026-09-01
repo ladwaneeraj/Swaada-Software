@@ -62,3 +62,14 @@ export function isToday(iso: string): boolean {
 export function byDisplayOrder<T extends { displayOrder: number }>(a: T, b: T): number {
   return a.displayOrder - b.displayOrder
 }
+
+/**
+ * Resolve an item/category image reference. Site-relative paths (the bundled
+ * illustrations in /menu/) are prefixed with the deploy base path so they
+ * work on GitHub Pages; full http(s)/data URLs (real photos from a DB later)
+ * pass through untouched.
+ */
+export function assetUrl(path: string): string {
+  if (/^(https?:)?\/\//.test(path) || path.startsWith('data:')) return path
+  return import.meta.env.BASE_URL.replace(/\/$/, '') + path
+}
