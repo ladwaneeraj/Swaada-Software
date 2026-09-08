@@ -96,10 +96,11 @@ function ItemsTab() {
       {/* Controls */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="relative min-w-52 flex-1">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-ink-300" />
-          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search items or categories…" className="pl-10" aria-label="Search menu items" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-300" />
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search items or categories…" className="pl-9" aria-label="Search menu items" />
         </div>
-        <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value as ID | 'all')} className="w-44" aria-label="Filter by category">
+        <div className="w-44 shrink-0">
+        <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value as ID | 'all')} aria-label="Filter by category">
           <option value="all">All categories</option>
           {sortedCategories.map((c) => (
             <option key={c.id} value={c.id}>
@@ -107,10 +108,11 @@ function ItemsTab() {
             </option>
           ))}
         </Select>
+        </div>
+        <div className="w-40 shrink-0">
         <Select
           value={availabilityFilter}
           onChange={(e) => setAvailabilityFilter(e.target.value as ItemAvailability | 'all')}
-          className="w-40"
           aria-label="Filter by availability"
         >
           <option value="all">Any status</option>
@@ -120,6 +122,7 @@ function ItemsTab() {
             </option>
           ))}
         </Select>
+        </div>
         <Button onClick={() => setEditing('new')}>
           <Plus className="size-4" /> Add item
         </Button>
@@ -138,7 +141,7 @@ function ItemsTab() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[46rem] text-left text-sm">
               <thead>
-                <tr className="border-b border-cream-200 text-xs uppercase tracking-wide text-ink-500">
+                <tr className="border-b border-surface-200 text-xs uppercase tracking-wide text-ink-500">
                   <th className="w-8 px-3 py-3" aria-label="Drag handle" />
                   <th className="px-3 py-3">Item</th>
                   <th className="px-3 py-3">Category</th>
@@ -198,7 +201,7 @@ function ItemRow({
     <tr
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn('border-b border-cream-100 last:border-0', isDragging && 'relative z-10 bg-cream-50 shadow-pop')}
+      className={cn('border-b border-surface-100 last:border-0', isDragging && 'relative z-10 bg-surface-50 shadow-pop')}
     >
       <td className="px-3 py-2.5">
         <button
@@ -207,7 +210,7 @@ function ItemRow({
           {...listeners}
           disabled={!dragEnabled}
           aria-label={`Reorder ${item.name}`}
-          className={cn('grid size-8 place-items-center rounded-lg text-ink-300', dragEnabled ? 'cursor-grab hover:bg-cream-100 hover:text-ink-700' : 'opacity-30')}
+          className={cn('grid size-8 place-items-center rounded-lg text-ink-300', dragEnabled ? 'cursor-grab hover:bg-surface-100 hover:text-ink-700' : 'opacity-30')}
         >
           <GripVertical className="size-4" />
         </button>
@@ -215,7 +218,7 @@ function ItemRow({
       <td className="px-3 py-2.5">
         <div className="flex items-center gap-2">
           {item.image && (
-            <img src={assetUrl(item.image)} alt="" loading="lazy" className="size-8 shrink-0 rounded-lg bg-cream-100 object-contain p-0.5" />
+            <img src={assetUrl(item.image)} alt="" loading="lazy" className="size-8 shrink-0 rounded-lg bg-surface-100 object-cover" />
           )}
           <VegMark isVeg={item.isVegetarian} className="size-3.5" />
           <span className="font-semibold">{item.name}</span>
@@ -247,7 +250,7 @@ function ItemRow({
       </td>
       <td className="px-3 py-2.5 text-ink-500">{stationName}</td>
       <td className="px-3 py-2.5 text-right">
-        <button type="button" onClick={onEdit} aria-label={`Edit ${item.name}`} className="grid size-8 place-items-center rounded-lg text-ink-500 hover:bg-cream-100 hover:text-ink-900">
+        <button type="button" onClick={onEdit} aria-label={`Edit ${item.name}`} className="grid size-8 place-items-center rounded-lg text-ink-500 hover:bg-surface-100 hover:text-ink-900">
           <Pencil className="size-4" />
         </button>
       </td>
@@ -383,7 +386,7 @@ function ItemEditor({ item, onClose }: { item: MenuItem | null; onClose: () => v
         <Field label="Search keywords" hint="Comma-separated, e.g. coffee — helps search find this item">
           <Input value={tagsText} onChange={(e) => setTagsText(e.target.value)} placeholder="coffee, latte" />
         </Field>
-        <Field label="Image" hint="Bundled illustration (/menu/….svg) or a full photo URL; empty shows the category icon">
+        <Field label="Image" hint="A photo URL, or a bundled path like /menu/pizza.svg; empty shows the category icon">
           <Input
             value={form.image ?? ''}
             onChange={(e) => patch({ image: e.target.value.trim() || null })}
@@ -407,15 +410,15 @@ function ItemEditor({ item, onClose }: { item: MenuItem | null; onClose: () => v
           />
         </Field>
 
-        <div className="flex items-center justify-between rounded-xl bg-cream-100 px-4 py-3">
+        <div className="flex items-center justify-between rounded-xl bg-surface-100 px-4 py-3">
           <span className="text-sm font-semibold">Vegetarian</span>
           <Toggle checked={form.isVegetarian} onChange={(v) => patch({ isVegetarian: v })} label="Vegetarian" />
         </div>
-        <div className="flex items-center justify-between rounded-xl bg-cream-100 px-4 py-3">
+        <div className="flex items-center justify-between rounded-xl bg-surface-100 px-4 py-3">
           <span className="text-sm font-semibold">Popular badge</span>
           <Toggle checked={form.isPopular} onChange={(v) => patch({ isPopular: v })} label="Popular" />
         </div>
-        <div className="flex items-center justify-between rounded-xl bg-cream-100 px-4 py-3">
+        <div className="flex items-center justify-between rounded-xl bg-surface-100 px-4 py-3">
           <span className="text-sm font-semibold">Recommended badge</span>
           <Toggle checked={form.isRecommended} onChange={(v) => patch({ isRecommended: v })} label="Recommended" />
         </div>
@@ -439,7 +442,7 @@ function ItemEditor({ item, onClose }: { item: MenuItem | null; onClose: () => v
                   }
                   className={cn(
                     'h-10 rounded-xl border px-3.5 text-sm font-semibold transition-colors',
-                    active ? 'border-accent-500 bg-accent-50 text-accent-600' : 'border-cream-300 bg-white text-ink-700 hover:border-cream-400',
+                    active ? 'border-accent-500 bg-accent-50 text-accent-600' : 'border-surface-300 bg-white text-ink-700 hover:border-surface-400',
                   )}
                 >
                   {g.name}
@@ -564,10 +567,10 @@ function CategoryRow({
         !category.isActive && 'opacity-60',
       )}
     >
-      <button type="button" {...attributes} {...listeners} aria-label={`Reorder ${category.name}`} className="grid size-9 shrink-0 cursor-grab place-items-center rounded-lg text-ink-300 hover:bg-cream-100 hover:text-ink-700">
+      <button type="button" {...attributes} {...listeners} aria-label={`Reorder ${category.name}`} className="grid size-9 shrink-0 cursor-grab place-items-center rounded-lg text-ink-300 hover:bg-surface-100 hover:text-ink-700">
         <GripVertical className="size-4" />
       </button>
-      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-cream-100 text-xl" aria-hidden>
+      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-surface-100 text-xl" aria-hidden>
         {category.icon}
       </span>
       <div className="min-w-0 flex-1">
@@ -580,7 +583,7 @@ function CategoryRow({
         </p>
       </div>
       <Toggle checked={category.isActive} onChange={onToggle} label={`${category.name} active`} />
-      <button type="button" onClick={onEdit} aria-label={`Edit ${category.name}`} className="grid size-9 place-items-center rounded-lg text-ink-500 hover:bg-cream-100 hover:text-ink-900">
+      <button type="button" onClick={onEdit} aria-label={`Edit ${category.name}`} className="grid size-9 place-items-center rounded-lg text-ink-500 hover:bg-surface-100 hover:text-ink-900">
         <Pencil className="size-4" />
       </button>
       <button type="button" onClick={onDelete} aria-label={`Delete ${category.name}`} className="grid size-9 place-items-center rounded-lg text-ink-300 hover:bg-danger-100 hover:text-danger-600">

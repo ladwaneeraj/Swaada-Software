@@ -19,19 +19,18 @@ type ButtonSize = 'sm' | 'md' | 'lg'
 
 const buttonVariants: Record<ButtonVariant, string> = {
   primary:
-    'bg-gradient-to-b from-accent-500 to-accent-600 text-white shadow-card hover:from-accent-600 hover:to-accent-600',
-  secondary:
-    'bg-white text-ink-900 border border-cream-300 hover:border-cream-400 hover:bg-cream-50',
-  ghost: 'bg-transparent text-ink-700 hover:bg-cream-200',
-  danger: 'bg-danger-600 text-white hover:opacity-90',
-  success: 'bg-ok-600 text-white hover:opacity-90',
-  dark: 'bg-ink-900 text-cream-50 hover:bg-ink-700',
+    'bg-gradient-to-b from-accent-500 to-accent-600 text-white shadow-accent hover:brightness-105',
+  secondary: 'bg-white text-ink-700 shadow-card ring-1 ring-surface-200 hover:text-ink-900 hover:shadow-lift',
+  ghost: 'bg-transparent text-ink-700 hover:bg-surface-200',
+  danger: 'bg-danger-600 text-white shadow-card hover:brightness-110',
+  success: 'bg-ok-600 text-white shadow-card hover:brightness-110',
+  dark: 'bg-ink-900 text-white shadow-card hover:bg-ink-700',
 }
 
 const buttonSizes: Record<ButtonSize, string> = {
-  sm: 'h-9 px-3 text-sm rounded-lg gap-1.5',
-  md: 'h-11 px-4 text-sm rounded-xl gap-2',
-  lg: 'h-13 px-6 text-base rounded-xl gap-2',
+  sm: 'h-9 px-3 text-[13px] rounded-[0.625rem] gap-1.5',
+  md: 'h-10 px-4 text-[13px] rounded-control gap-2',
+  lg: 'h-12 px-5 text-sm rounded-control gap-2',
 }
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -44,7 +43,7 @@ export function Button({ variant = 'primary', size = 'md', className, ...props }
     <button
       type="button"
       className={cn(
-        'inline-flex select-none items-center justify-center font-semibold transition-[color,background-color,border-color,transform,box-shadow]',
+        'inline-flex select-none items-center justify-center font-semibold transition-all duration-150',
         'active:scale-[0.97]',
         'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-500',
         'disabled:pointer-events-none disabled:opacity-45',
@@ -60,7 +59,7 @@ export function Button({ variant = 'primary', size = 'md', className, ...props }
 /* -------------------------------- Badge --------------------------------- */
 
 const toneStyles: Record<Tone, string> = {
-  neutral: 'bg-cream-200 text-ink-700',
+  neutral: 'bg-surface-200 text-ink-700',
   info: 'bg-info-100 text-info-600',
   warn: 'bg-warn-100 text-warn-600',
   ok: 'bg-ok-100 text-ok-600',
@@ -91,7 +90,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold',
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-[3px] text-[11px] font-bold',
         toneStyles[tone],
         className,
       )}
@@ -131,7 +130,7 @@ export function Card({
   testId?: string
 }) {
   return (
-    <div data-testid={testId} className={cn('rounded-card bg-white shadow-card', className)}>
+    <div data-testid={testId} className={cn('rounded-card bg-white shadow-card ring-1 ring-surface-200/70', className)}>
       {children}
     </div>
   )
@@ -154,22 +153,34 @@ export function Modal({ open, onClose, title, children, footer, position = 'cent
   const titleId = useId()
   const panelRef = useRef<HTMLDivElement>(null)
 
+  // Hold the close handler in a ref so it is NOT an effect dependency.
+  // Callers pass an inline arrow, so its identity changes on every parent
+  // render — and parents with a live timer (the tables floor) re-render every
+  // second. As a dependency it would re-run the effect on each tick and pull
+  // focus back to the panel, out of whatever field is being typed in.
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') closeRef.current()
     }
     window.addEventListener('keydown', onKey)
-    panelRef.current?.focus()
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open])
+
+  // Move focus into the dialog once, when it opens, and never again.
+  useEffect(() => {
+    if (open) panelRef.current?.focus()
+  }, [open])
 
   if (!open) return null
 
   return (
     <div
       className={cn(
-        'fixed inset-0 z-50 flex bg-ink-900/40 backdrop-blur-[2px]',
+        'fixed inset-0 z-50 flex bg-ink-900/35 backdrop-blur-[3px]',
         position === 'center' ? 'items-center justify-center p-4' : 'items-end justify-center sm:items-stretch sm:justify-end',
       )}
       onMouseDown={(e) => {
@@ -185,26 +196,26 @@ export function Modal({ open, onClose, title, children, footer, position = 'cent
         className={cn(
           'flex flex-col bg-white shadow-pop outline-none',
           position === 'center' &&
-            cn('max-h-[90vh] w-full rounded-card', wide ? 'max-w-2xl' : 'max-w-md'),
+            cn('max-h-[90vh] w-full rounded-2xl', wide ? 'max-w-2xl' : 'max-w-md'),
           position === 'sheet' &&
-            'max-h-[92vh] w-full rounded-t-card sm:max-h-none sm:w-[26.5rem] sm:rounded-l-card sm:rounded-tr-none',
+            'max-h-[92vh] w-full rounded-t-2xl sm:max-h-none sm:w-[27rem] sm:rounded-l-2xl sm:rounded-tr-none',
         )}
       >
-        <div className="flex items-center justify-between gap-4 border-b border-cream-200 px-5 py-4">
-          <h2 id={titleId} className="text-lg font-bold tracking-tight">
+        <div className="flex items-center justify-between gap-4 border-b border-surface-200 px-5 py-3.5">
+          <h2 id={titleId} className="text-[15px] font-bold tracking-tight">
             {title}
           </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="grid size-9 place-items-center rounded-lg text-ink-500 hover:bg-cream-200"
+            className="grid size-9 place-items-center rounded-full text-ink-500 transition-colors hover:bg-surface-200"
           >
-            <X className="size-5" />
+            <X className="size-4.5" />
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
-        {footer && <div className="border-t border-cream-200 px-5 py-4">{footer}</div>}
+        {footer && <div className="border-t border-surface-200 bg-surface-100/60 px-5 py-4">{footer}</div>}
       </div>
     </div>
   )
@@ -222,19 +233,21 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
   )
 }
 
+/* Fields deliberately do NOT set a width: a caller passing w-44 would lose to
+   a baked-in w-full, so width belongs to whoever places the field. */
 const inputBase =
-  'w-full rounded-xl border border-cream-300 bg-white px-3.5 text-[15px] text-ink-900 placeholder:text-ink-300 focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20'
+  'block rounded-control border border-surface-200 bg-surface-100 px-3.5 text-[13px] text-ink-900 transition-colors placeholder:text-ink-300 focus:border-accent-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-accent-500/10'
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={cn(inputBase, 'h-11', props.className)} />
+  return <input {...props} className={cn(inputBase, 'h-10 w-full', props.className)} />
 }
 
 export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea {...props} className={cn(inputBase, 'min-h-20 py-2.5', props.className)} />
+  return <textarea {...props} className={cn(inputBase, 'min-h-20 w-full py-2', props.className)} />
 }
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className={cn(inputBase, 'h-11', props.className)} />
+  return <select {...props} className={cn(inputBase, 'h-10 w-full', props.className)} />
 }
 
 /* -------------------------------- Toggle --------------------------------- */
@@ -257,7 +270,7 @@ export function Toggle({
       onClick={() => onChange(!checked)}
       className={cn(
         'relative h-7 w-12 shrink-0 rounded-full transition-colors',
-        checked ? 'bg-ok-600' : 'bg-cream-300',
+        checked ? 'bg-ok-600' : 'bg-surface-300',
       )}
     >
       <span
@@ -284,7 +297,7 @@ export function Segmented<T extends string>({
   size?: 'sm' | 'md'
 }) {
   return (
-    <div className="inline-flex rounded-xl bg-cream-200 p-1" role="radiogroup">
+    <div className="inline-flex rounded-full bg-surface-200 p-1" role="radiogroup">
       {options.map((o) => (
         <button
           key={o.value}
@@ -293,7 +306,7 @@ export function Segmented<T extends string>({
           aria-checked={value === o.value}
           onClick={() => onChange(o.value)}
           className={cn(
-            'rounded-lg font-semibold transition-colors',
+            'rounded-full font-semibold transition-all',
             size === 'sm' ? 'px-2.5 py-1 text-xs' : 'px-3.5 py-1.5 text-sm',
             value === o.value ? 'bg-white text-ink-900 shadow-card' : 'text-ink-500 hover:text-ink-700',
           )}
@@ -319,7 +332,7 @@ export function EmptyState({
   action?: ReactNode
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 rounded-card border border-dashed border-cream-300 bg-cream-50 px-6 py-14 text-center">
+    <div className="flex flex-col items-center justify-center gap-2 rounded-card border border-dashed border-surface-300 bg-white/60 px-6 py-16 text-center">
       <div className="text-4xl" aria-hidden>
         {icon}
       </div>
@@ -352,7 +365,7 @@ export function Stat({
       )}
       <div className="min-w-0">
         <p className="truncate text-[13px] font-semibold uppercase tracking-wide text-ink-500">{label}</p>
-        <p className="font-display text-[1.75rem] font-semibold leading-tight tabular-nums">{value}</p>
+        <p className="font-display text-2xl font-bold leading-tight tabular-nums">{value}</p>
         {sub && <p className="text-xs text-ink-500">{sub}</p>}
       </div>
     </Card>

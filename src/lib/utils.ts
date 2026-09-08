@@ -16,6 +16,18 @@ export function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
 
+/** Keep a number inside [min, max]; NaN falls back to min. */
+export function clamp(n: number, min: number, max: number): number {
+  if (!Number.isFinite(n)) return min
+  return Math.min(Math.max(n, min), max)
+}
+
+/** Parse a rupee text input ("", "1,200", "abc") into a usable number. */
+export function parseAmount(text: string): number {
+  const n = Number(text.replace(/[^0-9.]/g, ''))
+  return Number.isFinite(n) ? n : 0
+}
+
 let uidCounter = 0
 
 /** Collision-safe id for client-created rows; a DB will assign UUIDs later. */
@@ -66,12 +78,16 @@ export function byDisplayOrder<T extends { displayOrder: number }>(a: T, b: T): 
 }
 
 /**
- * Resolve an item/category image reference. Site-relative paths (the bundled
- * illustrations in /menu/) are prefixed with the deploy base path so they
- * work on GitHub Pages; full http(s)/data URLs (real photos from a DB later)
- * pass through untouched.
+ * Resolve an item/category image reference to something an <img> can load:
+ *
+ *  - full http(s)/data URLs (photos from a DB later) pass through,
+ *  - bundled photos already carry the deploy base (Vite resolves them),
+ *  - site-relative paths (/menu/….svg) get the base path added so they work
+ *    under a sub-path deploy like GitHub Pages.
  */
 export function assetUrl(path: string): string {
   if (/^(https?:)?\/\//.test(path) || path.startsWith('data:')) return path
-  return import.meta.env.BASE_URL.replace(/\/$/, '') + path
+  const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+  if (!base || path.startsWith(`${base}/`)) return path
+  return base + path
 }

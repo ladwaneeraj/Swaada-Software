@@ -1,19 +1,17 @@
 import {
   BarChart3,
+  BookOpenText,
   ChefHat,
   ClipboardList,
   Coffee,
   History,
   LayoutDashboard,
   LogOut,
-  PanelLeftClose,
-  PanelLeftOpen,
   Settings,
   UsersRound,
   UtensilsCrossed,
-  BookOpenText,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { ConnectionBadge } from '@/components/ConnectionBadge'
 import { FullscreenButton } from '@/components/FullscreenButton'
@@ -34,33 +32,12 @@ const NAV = [
   { to: '/admin/settings', label: 'Settings', icon: Settings },
 ]
 
-const SIDEBAR_KEY = 'swaada.ui.sidebarExpanded'
-
 export function AdminLayout() {
   const session = useAppStore((s) => s.session)
   const logout = useAppStore((s) => s.logout)
   const cafeName = useAppStore((s) => s.db.settings.cafeName)
   const navigate = useNavigate()
   const pushToast = useToasts((s) => s.push)
-
-  // Icon rail by default for maximum working space; the choice sticks.
-  const [expanded, setExpanded] = useState(() => {
-    try {
-      return localStorage.getItem(SIDEBAR_KEY) === '1'
-    } catch {
-      return false
-    }
-  })
-  const toggleSidebar = () => {
-    setExpanded((prev) => {
-      try {
-        localStorage.setItem(SIDEBAR_KEY, prev ? '0' : '1')
-      } catch {
-        /* ignore */
-      }
-      return !prev
-    })
-  }
 
   // Surface kitchen progress to the admin without them watching the screen.
   useEffect(() => {
@@ -83,140 +60,64 @@ export function AdminLayout() {
   }
 
   return (
-    <div className="flex min-h-dvh">
-      {/* Sidebar (desktop): icon rail by default, expandable when needed */}
-      <aside
-        className={cn(
-          'sticky top-0 hidden h-dvh shrink-0 flex-col border-r border-cream-200 bg-white transition-[width] duration-200 lg:flex',
-          expanded ? 'w-60' : 'w-[4.5rem]',
-        )}
-      >
-        <div className={cn('flex shrink-0 items-center py-5', expanded ? 'gap-3 px-5' : 'flex-col gap-2 px-3')}>
-          <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-ink-900" aria-hidden>
-            <Coffee className="size-5 text-cream-100" />
-          </div>
-          {expanded && (
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[15px] font-bold leading-tight tracking-tight">{cafeName}</p>
-              <p className="text-xs text-ink-500">Admin</p>
+    <div className="flex min-h-dvh flex-col">
+      {/* One top bar for the whole app: identity on the left, every screen as
+          an icon across the middle, session controls on the right. Nothing
+          eats horizontal space, which is what the floor plan and the billing
+          screen both want. */}
+      <header className="sticky top-0 z-40 bg-white/90 shadow-card backdrop-blur-md">
+        <div className="flex items-center gap-3 px-3 py-2">
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="grid size-9 place-items-center rounded-xl bg-gradient-to-b from-accent-500 to-accent-600 shadow-accent" aria-hidden>
+              <Coffee className="size-4.5 text-white" />
             </div>
-          )}
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
-            aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
-            className="grid size-9 shrink-0 place-items-center rounded-lg text-ink-500 hover:bg-cream-100 hover:text-ink-900"
-          >
-            {expanded ? <PanelLeftClose className="size-[18px]" /> : <PanelLeftOpen className="size-[18px]" />}
-          </button>
-        </div>
-        {/* Scrolls on short/zoomed screens so the footer never gets clipped */}
-        <nav className={cn('min-h-0 flex-1 space-y-1 overflow-y-auto pb-2', expanded ? 'px-3' : 'px-3.5')} aria-label="Main">
-          {NAV.map(({ to, label, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              title={label}
-              className={({ isActive }) =>
-                cn(
-                  'flex h-11 items-center rounded-xl text-sm font-semibold transition-colors',
-                  expanded ? 'gap-3 px-3' : 'justify-center',
-                  isActive ? 'bg-accent-50 text-accent-600' : 'text-ink-700 hover:bg-cream-100',
-                )
-              }
-            >
-              <Icon className="size-[18px] shrink-0" />
-              {expanded && label}
-            </NavLink>
-          ))}
-        </nav>
-        <div className={cn('shrink-0 border-t border-cream-200', expanded ? 'p-4' : 'flex flex-col items-center gap-2 py-4')}>
-          {expanded ? (
-            <>
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-bold">{session?.name}</p>
-                  <p className="text-xs capitalize text-ink-500">{session?.role}</p>
-                </div>
-                <div className="flex items-center gap-1">
-                  <FullscreenButton />
-                  <ConnectionBadge />
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-cream-300 text-sm font-semibold text-ink-700 hover:bg-cream-100"
-              >
-                <LogOut className="size-4" /> Log out
-              </button>
-            </>
-          ) : (
-            <>
-              <FullscreenButton />
-              <ConnectionBadge compact />
-              <button
-                type="button"
-                onClick={handleLogout}
-                title="Log out"
-                aria-label="Log out"
-                className="grid size-9 place-items-center rounded-lg text-ink-500 hover:bg-cream-100 hover:text-ink-900"
-              >
-                <LogOut className="size-4" />
-              </button>
-            </>
-          )}
-        </div>
-      </aside>
+            <p className="hidden text-sm font-bold leading-tight sm:block">{cafeName}</p>
+          </div>
 
-      {/* Main column */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        {/* Top bar (mobile / tablet) */}
-        <header className="sticky top-0 z-40 border-b border-cream-200 bg-white/90 backdrop-blur lg:hidden">
-          <div className="flex items-center justify-between gap-3 px-4 py-3">
-            <div className="flex items-center gap-2.5">
-              <div className="grid size-9 place-items-center rounded-lg bg-ink-900" aria-hidden>
-                <Coffee className="size-4 text-cream-100" />
-              </div>
-              <p className="text-[15px] font-bold tracking-tight">{cafeName}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <ConnectionBadge />
-              <FullscreenButton />
-              <button
-                type="button"
-                onClick={handleLogout}
-                aria-label="Log out"
-                className="grid size-9 place-items-center rounded-lg text-ink-500 hover:bg-cream-200"
-              >
-                <LogOut className="size-[18px]" />
-              </button>
-            </div>
-          </div>
-          <nav className="no-scrollbar flex gap-1 overflow-x-auto px-3 pb-2" aria-label="Main">
+          <nav className="no-scrollbar flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto" aria-label="Main">
             {NAV.map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={to}
                 to={to}
+                title={label}
                 className={({ isActive }) =>
                   cn(
-                    'flex h-10 shrink-0 items-center gap-2 rounded-xl px-3.5 text-sm font-semibold',
-                    isActive ? 'bg-ink-900 text-white' : 'text-ink-700 hover:bg-cream-200',
+                    'flex h-[3.25rem] w-[4.5rem] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl text-[10px] font-semibold transition-all duration-150',
+                    isActive
+                      ? 'bg-accent-50 text-accent-600 shadow-[inset_0_0_0_1px_rgb(232_57_74/0.14)]'
+                      : 'text-ink-500 hover:bg-surface-100 hover:text-ink-900',
                   )
                 }
               >
-                <Icon className="size-4" />
+                <Icon className="size-[18px]" />
                 {label}
               </NavLink>
             ))}
           </nav>
-        </header>
 
-        <main className="min-w-0 flex-1 p-4 sm:p-6">
-          <Outlet />
-        </main>
-      </div>
+          <div className="flex shrink-0 items-center gap-1.5 border-l border-surface-200 pl-3">
+            <ConnectionBadge compact />
+            <FullscreenButton />
+            <div className="hidden text-right leading-tight md:block">
+              <p className="text-[13px] font-bold">{session?.name}</p>
+              <p className="text-[11px] capitalize text-ink-500">{session?.role}</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleLogout}
+              title="Log out"
+              aria-label="Log out"
+              className="grid size-9 place-items-center rounded-full text-ink-500 transition-colors hover:bg-surface-100 hover:text-ink-900"
+            >
+              <LogOut className="size-[18px]" />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="min-w-0 flex-1 p-4 sm:p-5">
+        <Outlet />
+      </main>
       <Toaster />
     </div>
   )
@@ -233,10 +134,10 @@ export function PageHeader({
   actions?: React.ReactNode
 }) {
   return (
-    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h1 className="font-display text-[1.75rem] font-semibold leading-tight">{title}</h1>
-        {sub && <p className="mt-0.5 text-sm text-ink-500">{sub}</p>}
+        <h1 className="font-display text-[1.375rem] font-bold leading-tight">{title}</h1>
+        {sub && <p className="mt-0.5 text-[13px] text-ink-500">{sub}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>

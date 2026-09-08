@@ -105,8 +105,12 @@ export interface CafeTable {
   isActive: boolean
 }
 
-/** Derived at read time from active orders; never stored. */
-export type TableStatus = 'available' | 'occupied'
+/**
+ * What a table looks like on the floor plan, derived at read time from its
+ * active orders and never stored. These are the four colours on the legend.
+ */
+export const FLOOR_STATES = ['free', 'running', 'ready', 'billing'] as const
+export type FloorState = (typeof FLOOR_STATES)[number]
 
 /* ------------------------------------------------------------------ */
 /* Orders                                                              */
@@ -159,6 +163,17 @@ export interface OrderItem {
   queuedAt: string
   startedAt?: string
   readyAt?: string
+  /**
+   * Set when the line was reduced or removed after the round was placed:
+   * who changed it, why, and what the quantity was before. Kept on the item
+   * so the correction survives into history instead of quietly vanishing.
+   */
+  adjustment?: {
+    at: string
+    byName: string
+    reason: string
+    fromQuantity: number
+  }
 }
 
 export interface Order {
@@ -168,10 +183,7 @@ export interface Order {
   tableName: string
   items: OrderItem[]
   status: OrderStatus
-  subtotal: number
-  taxLabel: string
-  taxRatePercent: number
-  taxAmount: number
+  /** Sum of the round's active lines. No tax is applied anywhere. */
   total: number
   createdByUserId: ID
   createdByName: string
@@ -185,9 +197,8 @@ export interface Order {
   settledAt?: string
   cancelledAt?: string
   cancelReason?: string
-  /** Set when the round is settled into a bill. */
+  /** Set when the round is settled into a bill; the bill holds the payment. */
   billId?: ID
-  paymentMethod?: PaymentMethod
 }
 
 /* ------------------------------------------------------------------ */
@@ -197,10 +208,12 @@ export interface Order {
 export const PAYMENT_METHODS = ['cash', 'upi'] as const
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number]
 
-export interface BillDiscount {
-  type: 'percent' | 'flat'
-  value: number
-}
+/**
+ * How a bill was paid, in rupees per method. A single-method bill simply has
+ * 0 in the other slots, so split and non-split bills read the same way and a
+ * new method later is one entry in PAYMENT_METHODS.
+ */
+export type BillPayments = Record<PaymentMethod, number>
 
 /** One settled sitting: all of a table's rounds paid together at the end. */
 export interface Bill {
@@ -212,20 +225,17 @@ export interface Bill {
   orderNumbers: number[]
   customerName?: string
   customerPhone?: string
-  /** Sum of round subtotals, before any adjustment. */
+  /** Sum of round totals, before any adjustment. */
   subtotal: number
-  discount?: BillDiscount
+  /** Flat rupees off the bill; never more than the subtotal. */
   discountAmount: number
-  taxLabel: string
-  taxRatePercent: number
-  taxAmount: number
   /** Loyalty points applied to this bill and their rupee value. */
   pointsRedeemed: number
   pointsValueRedeemed: number
   /** Points earned by this bill (0 when loyalty is off or no phone). */
   pointsEarned: number
   total: number
-  paymentMethod: PaymentMethod
+  payments: BillPayments
   settledAt: string
   settledByUserId: ID
   settledByName: string
@@ -258,8 +268,6 @@ export interface Session {
 
 export interface CafeSettings {
   cafeName: string
-  taxLabel: string
-  taxRatePercent: number
   currency: 'INR'
   /** Ask for customer name & mobile on a table's first round (optional). */
   askCustomerInfo: boolean

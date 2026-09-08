@@ -41,15 +41,15 @@ export function KitchenPage() {
       <header className="flex items-center justify-between gap-4 px-5 py-4">
         <div className="flex items-center gap-3">
           <div className="grid size-10 place-items-center rounded-xl bg-white/10" aria-hidden>
-            <ChefHat className="size-5 text-cream-100" />
+            <ChefHat className="size-5 text-surface-100" />
           </div>
           <div>
             <p className="font-display text-xl font-semibold text-white">Kitchen</p>
-            <p className="text-xs text-cream-400">{cafeName}</p>
+            <p className="text-xs text-surface-400">{cafeName}</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm font-bold tabular-nums text-cream-300">{timeLabel(new Date(now).toISOString())}</span>
+          <span className="text-sm font-bold tabular-nums text-surface-300">{timeLabel(new Date(now).toISOString())}</span>
           <ConnectionBadge dark />
           <FullscreenButton dark />
           <button
@@ -59,7 +59,7 @@ export function KitchenPage() {
               navigate('/login')
             }}
             aria-label="Log out"
-            className="grid size-10 place-items-center rounded-xl text-cream-300 hover:bg-white/10"
+            className="grid size-10 place-items-center rounded-xl text-surface-300 hover:bg-white/10"
           >
             <LogOut className="size-5" />
           </button>

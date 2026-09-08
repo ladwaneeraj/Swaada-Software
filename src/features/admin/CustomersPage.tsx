@@ -2,7 +2,7 @@ import { ChevronDown, Phone, Sparkles } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { PageHeader } from '@/components/layout/AdminLayout'
 import { Badge, Card, EmptyState, Input } from '@/components/ui'
-import { PAYMENT_METHOD_META } from '@/lib/statusMeta'
+import { paymentSummary } from '@/lib/statusMeta'
 import { cn, dateTimeLabel, formatINR } from '@/lib/utils'
 import { customerProfiles } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
@@ -69,7 +69,7 @@ export function CustomersPage() {
                   type="button"
                   onClick={() => setExpandedPhone(open ? null : c.phone)}
                   aria-expanded={open}
-                  className="flex w-full items-center gap-4 px-5 py-4 text-left hover:bg-cream-50"
+                  className="flex w-full items-center gap-4 px-5 py-4 text-left hover:bg-surface-50"
                 >
                   <span className="grid size-11 shrink-0 place-items-center rounded-full bg-accent-50 text-base font-bold text-accent-600">
                     {c.name.trim().charAt(0).toUpperCase() || '?'}
@@ -95,8 +95,8 @@ export function CustomersPage() {
                 </button>
 
                 {open && (
-                  <div className="border-t border-cream-100 px-5 py-3">
-                    <ul className="divide-y divide-cream-100">
+                  <div className="border-t border-surface-100 px-5 py-3">
+                    <ul className="divide-y divide-surface-100">
                       {customerBills.map((b) => (
                         <li key={b.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
                           <div className="min-w-0">
@@ -112,9 +112,7 @@ export function CustomersPage() {
                             </p>
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
-                            <Badge tone="ok">
-                              {PAYMENT_METHOD_META[b.paymentMethod].icon} {PAYMENT_METHOD_META[b.paymentMethod].label}
-                            </Badge>
+                            <Badge tone="ok">{paymentSummary(b.payments, 'short')}</Badge>
                             <span className="w-20 text-right font-bold tabular-nums">{formatINR(b.total)}</span>
                           </div>
                         </li>

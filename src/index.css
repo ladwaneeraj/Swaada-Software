@@ -1,42 +1,47 @@
 @import 'tailwindcss';
 
 @theme {
-  /* Brand palette: warm café neutrals + terracotta accent */
-  --color-cream-50: #fbf9f5;
-  --color-cream-100: #f7f3ec;
-  --color-cream-200: #efe8db;
-  --color-cream-300: #e3d8c5;
-  --color-cream-400: #cbbca2;
+  /* Soft operations palette: cool off-white floor, white cards that lift
+     rather than outline, one warm red for anything that commits. Everything
+     visual in the app resolves to these tokens. */
+  --color-surface-50: #ffffff;
+  --color-surface-100: #f5f6f9;
+  --color-surface-200: #ecedf2;
+  --color-surface-300: #dcdee7;
+  --color-surface-400: #b6bac7;
 
-  --color-ink-900: #221c17;
-  --color-ink-700: #47403a;
-  --color-ink-500: #6f665d;
-  --color-ink-300: #a49a8e;
+  --color-ink-900: #171a21;
+  --color-ink-700: #3d4453;
+  --color-ink-500: #6d7486;
+  --color-ink-300: #a2a8b8;
 
-  --color-accent-600: #b34e24;
-  --color-accent-500: #c75b2b;
-  --color-accent-100: #f8e7dc;
-  --color-accent-50: #fbf1ea;
+  --color-accent-600: #cc2434;
+  --color-accent-500: #e8394a;
+  --color-accent-100: #fde3e6;
+  --color-accent-50: #fff5f6;
 
   --color-veg: #1e7b3c;
   --color-nonveg: #a93226;
 
-  --color-ok-600: #1e7b3c;
-  --color-ok-100: #e2f2e7;
-  --color-warn-600: #a16207;
-  --color-warn-100: #fcf1d4;
-  --color-info-600: #1d5c96;
-  --color-info-100: #e2eefa;
-  --color-danger-600: #b3261e;
-  --color-danger-100: #fbe4e2;
+  --color-ok-600: #17804a;
+  --color-ok-100: #dbf3e5;
+  --color-warn-600: #96650d;
+  --color-warn-100: #fdf0cd;
+  --color-info-600: #1f6dc0;
+  --color-info-100: #ddebfb;
+  --color-danger-600: #c72a2a;
+  --color-danger-100: #fce3e3;
 
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
-  --font-display: 'Fraunces Variable', Georgia, 'Times New Roman', serif;
 
-  --shadow-card: 0 1px 2px rgb(34 28 23 / 0.05), 0 4px 14px rgb(34 28 23 / 0.07);
-  --shadow-pop: 0 4px 10px rgb(34 28 23 / 0.08), 0 16px 40px rgb(34 28 23 / 0.16);
+  /* Depth comes from two soft layers, never a hard 1px line */
+  --shadow-card: 0 1px 2px rgb(23 26 33 / 0.04), 0 4px 14px rgb(23 26 33 / 0.05);
+  --shadow-lift: 0 2px 4px rgb(23 26 33 / 0.05), 0 10px 26px rgb(23 26 33 / 0.09);
+  --shadow-pop: 0 8px 20px rgb(23 26 33 / 0.10), 0 28px 60px rgb(23 26 33 / 0.16);
+  --shadow-accent: 0 2px 10px rgb(232 57 74 / 0.32);
 
   --radius-card: 1rem;
+  --radius-control: 0.75rem;
 }
 
 html {
@@ -47,8 +52,25 @@ html {
 
 body {
   margin: 0;
-  background-color: var(--color-cream-100);
+  background-color: var(--color-surface-100);
   color: var(--color-ink-900);
+}
+
+/* Rounded scroll areas read softer than default browser bars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-surface-300) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-surface-300);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* Comfortable touch scrolling for horizontal chip rows */
@@ -79,10 +101,9 @@ body {
   }
 }
 
-/* Display face for headings and hero numbers */
+/* Headings: same face as the UI, just tighter. An operations screen reads
+   better in one typeface than in a display serif. */
 .font-display {
-  font-family: var(--font-display);
-  font-variation-settings: 'opsz' 40;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
 }
 

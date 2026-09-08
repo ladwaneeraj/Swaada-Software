@@ -31,6 +31,9 @@ const stations: Station[] = [
   { id: 'st-pizza', name: 'Pizza Station', icon: '🍕', displayOrder: 4, isActive: true },
   { id: 'st-hot', name: 'Hot Kitchen', icon: '🍝', displayOrder: 5, isActive: true },
   { id: 'st-dessert', name: 'Dessert Counter', icon: '🍰', displayOrder: 6, isActive: true },
+  // Packaged goods are picked off the shelf, not cooked, but they still route
+  // through a station so the ticket tells staff where to get them.
+  { id: 'st-counter', name: 'Front Counter', icon: '🧾', displayOrder: 7, isActive: true },
 ]
 
 /* ------------------------------ Categories ----------------------------- */
@@ -47,6 +50,7 @@ const categories: Category[] = [
   { id: 'cat-burgers', name: 'Burgers', icon: '🍔', description: 'Toasted buns, crisp patties', displayOrder: 9, isActive: true, ...stamp },
   { id: 'cat-light-bites', name: 'Light Bites', icon: '🥗', description: 'Salads and fresh bowls', displayOrder: 10, isActive: true, ...stamp },
   { id: 'cat-desserts', name: 'Desserts', icon: '🍰', description: 'Baked, frozen and indulgent', displayOrder: 11, isActive: true, ...stamp },
+  { id: 'cat-counter', name: 'Counter', icon: '🧾', description: 'Bottled water and packaged counter sales', displayOrder: 12, isActive: true, ...stamp },
 ]
 
 /* --------------------------- Modifier groups --------------------------- */
@@ -105,7 +109,7 @@ const modifierOptions: ModifierOption[] = [
   opt('grp-bev-prefs', 'mo-no-sugar', 'No Sugar', 0, 2),
   opt('grp-bev-prefs', 'mo-no-ice', 'No Ice', 0, 3),
 
-  opt('grp-dessert-addons', 'mo-icecream-scoop', 'Ice Cream Scoop', 40, 1),
+  opt('grp-dessert-addons', 'mo-icesurface-scoop', 'Ice Cream Scoop', 40, 1),
   opt('grp-dessert-addons', 'mo-choc-sauce', 'Chocolate Sauce', 20, 2),
 ]
 
@@ -166,6 +170,8 @@ const ITEM_IMAGES: Record<string, string[]> = {
   cake: ['itm-chocolate-cake', 'itm-pastry'],
   cheesecake: ['itm-cheesecake'],
   'ice-cream': ['itm-ice-cream', 'itm-sundae'],
+  'water-bottle': ['itm-water-500', 'itm-water-1l', 'itm-water-chilled'],
+  cigarette: ['itm-cigarette-single', 'itm-cigarette-pack'],
 }
 
 const imageByItemId = new Map<string, string>()
@@ -173,13 +179,31 @@ for (const [img, ids] of Object.entries(ITEM_IMAGES)) {
   ids.forEach((id) => imageByItemId.set(id, `/menu/${img}.svg`))
 }
 
+/**
+ * Real photos, resolved at build time. Drop a file into
+ * src/assets/menu-photos/ named after the item id WITHOUT its `itm-` prefix
+ * — paneer-pizza.webp for itm-paneer-pizza — and the next build picks it up.
+ * There is no list to keep in sync here: the folder is the list. Items with
+ * no photo fall back to the bundled illustration above, and items with
+ * neither show their category icon.
+ */
+const photoByItemId = new Map<string, string>(
+  Object.entries(
+    import.meta.glob('../assets/menu-photos/*.{webp,avif,jpg,jpeg,png}', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    }) as Record<string, string>,
+  ).map(([path, url]) => [`itm-${path.split('/').pop()!.replace(/\.[^.]+$/, '')}`, url]),
+)
+
 function buildItems(categoryId: ID, defaults: CategoryDefaults, seeds: ItemSeed[]): MenuItem[] {
   return seeds.map((s, i) => ({
     id: s.id,
     categoryId,
     name: s.name,
     description: s.desc,
-    image: imageByItemId.get(s.id) ?? null,
+    image: photoByItemId.get(s.id) ?? imageByItemId.get(s.id) ?? null,
     basePrice: s.price,
     availability: s.availability ?? 'available',
     isVegetarian: s.veg ?? true,
@@ -360,6 +384,24 @@ const desserts = buildItems(
   ],
 )
 
+/**
+ * Counter sales: bottled water and packaged goods the café hands over rather
+ * than cooks. Prices and names are sample values — edit them in Menu
+ * management. Tobacco is an age-restricted sale; the POS records it like any
+ * other line and the staff still do the age check at the counter.
+ */
+const counter = buildItems(
+  'cat-counter',
+  { station: 'st-counter', prep: 1, mods: [] },
+  [
+    { id: 'itm-water-500', name: 'Water Bottle 500 ml', desc: 'Sealed packaged drinking water', price: 20, popular: true, tags: ['water', 'bottle'] },
+    { id: 'itm-water-1l', name: 'Water Bottle 1 L', desc: 'Sealed packaged drinking water, large', price: 40, tags: ['water', 'bottle'] },
+    { id: 'itm-water-chilled', name: 'Chilled Water 500 ml', desc: 'Straight from the fridge', price: 25, tags: ['water', 'bottle', 'cold'] },
+    { id: 'itm-cigarette-single', name: 'Cigarette (single)', desc: 'Sold per stick at the counter', price: 20, tags: ['smoke', 'tobacco'] },
+    { id: 'itm-cigarette-pack', name: 'Cigarette (pack)', desc: 'Full pack, price varies by brand', price: 380, tags: ['smoke', 'tobacco'] },
+  ],
+)
+
 const items: MenuItem[] = [
   ...hotBeverages,
   ...coldBeverages,
@@ -372,6 +414,7 @@ const items: MenuItem[] = [
   ...burgers,
   ...lightBites,
   ...desserts,
+  ...counter,
 ]
 
 /* -------------------------------- Tables ------------------------------- */
@@ -406,7 +449,7 @@ const users: User[] = [
 
 export function seedSnapshot(): DBSnapshot {
   return structuredClone({
-    schemaVersion: 5,
+    schemaVersion: 7,
     categories,
     items,
     modifierGroups,
@@ -418,8 +461,6 @@ export function seedSnapshot(): DBSnapshot {
     users,
     settings: {
       cafeName: 'Swaada Café',
-      taxLabel: 'GST',
-      taxRatePercent: 5,
       currency: 'INR' as const,
       askCustomerInfo: true,
       loyalty: {

@@ -16,7 +16,7 @@ export function KitchenMonitorPage() {
         actions={
           <Link
             to="/kitchen"
-            className="inline-flex h-11 items-center gap-2 rounded-xl border border-cream-300 bg-white px-4 text-sm font-semibold text-ink-700 hover:bg-cream-50"
+            className="inline-flex h-11 items-center gap-2 rounded-xl border border-surface-300 bg-white px-4 text-sm font-semibold text-ink-700 hover:bg-surface-50"
           >
             <ExternalLink className="size-4" /> Open kitchen display
           </Link>

@@ -1,10 +1,10 @@
-import { byDisplayOrder, nowISO, round2, uid } from '@/lib/utils'
+import { byDisplayOrder, clamp, nowISO, round2, uid } from '@/lib/utils'
 import type {
   Bill,
-  BillDiscount,
+  BillPayments,
   CafeSettings,
-  CafeTable,
   Category,
+  FloorState,
   ID,
   ItemAvailability,
   MenuItem,
@@ -14,11 +14,12 @@ import type {
   OrderItem,
   OrderItemModifier,
   OrderItemStatus,
-  PaymentMethod,
   RealtimeEvent,
   Session,
+  PaymentMethod,
   Station,
 } from '@/types'
+import { PAYMENT_METHODS } from '@/types'
 import { db } from './db'
 
 /**
@@ -212,17 +213,13 @@ export function lineUnitPrice(basePrice: number, modifiers: OrderItemModifier[])
   return basePrice + modifiers.reduce((sum, m) => sum + m.priceAdjustment, 0)
 }
 
-function computeTotals(items: OrderItem[], settings: CafeSettings) {
-  const active = items.filter((i) => i.status !== 'cancelled')
-  const subtotal = round2(active.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0))
-  const taxAmount = round2((subtotal * settings.taxRatePercent) / 100)
-  return {
-    subtotal,
-    taxAmount,
-    total: round2(subtotal + taxAmount),
-    taxLabel: settings.taxLabel,
-    taxRatePercent: settings.taxRatePercent,
-  }
+/** A round's payable amount: the sum of its live lines. No tax is charged. */
+export function orderTotal(items: OrderItem[]): number {
+  return round2(
+    items
+      .filter((i) => i.status !== 'cancelled')
+      .reduce((sum, i) => sum + i.unitPrice * i.quantity, 0),
+  )
 }
 
 export const orderService = {
@@ -274,7 +271,7 @@ export const orderService = {
         tableName: table?.name ?? 'Takeaway',
         items,
         status: 'placed',
-        ...computeTotals(items, draft.settings),
+        total: orderTotal(items),
         createdByUserId: input.session.userId,
         createdByName: input.session.name,
         customerName: input.customerName?.trim() || undefined,
@@ -325,6 +322,68 @@ export const orderService = {
     })
   },
 
+  /**
+   * Correct a single line on a round that has not been paid for yet: reduce
+   * its quantity, or remove it outright with `quantity: 0`.
+   *
+   * Quantities can only go DOWN. Adding food means a new round, because a
+   * round is what the kitchen has already been told to cook; silently
+   * bumping a quantity here would put an item on the bill that nobody made.
+   * The round's total is recomputed, and a round left with nothing on it is
+   * cancelled rather than sitting on the bill at ₹0.
+   */
+  adjustItem(input: {
+    orderId: ID
+    itemId: ID
+    quantity: number
+    reason: string
+    session: Session
+  }): void {
+    db.mutate((draft) => {
+      const order = draft.orders.find((o) => o.id === input.orderId)
+      if (!order || order.status === 'settled' || order.status === 'cancelled') return
+      const item = order.items.find((i) => i.id === input.itemId)
+      if (!item || item.status === 'cancelled') return
+
+      const next = Math.max(0, Math.floor(input.quantity))
+      if (next >= item.quantity) return
+
+      const now = nowISO()
+      const adjustment = {
+        at: now,
+        byName: input.session.name,
+        reason: input.reason.trim() || 'no reason given',
+        fromQuantity: item.quantity,
+      }
+      if (next === 0) {
+        item.status = 'cancelled'
+        item.adjustment = adjustment
+      } else {
+        item.quantity = next
+        item.adjustment = adjustment
+      }
+
+      const live = order.items.filter((i) => i.status !== 'cancelled')
+      if (live.length === 0) {
+        order.status = 'cancelled'
+        order.cancelledAt = now
+        order.cancelReason = `Every item removed: ${adjustment.reason}`
+        order.total = 0
+        return { type: 'ORDER_CANCELLED', orderId: order.id }
+      }
+
+      order.total = orderTotal(order.items)
+      // Removing the last unfinished item can complete a round that was
+      // still waiting on it, so the kitchen status is re-derived here too.
+      if (isKitchenActiveOrder(order) && live.every((i) => i.status === 'ready')) {
+        order.status = 'ready'
+        order.readyAt = order.readyAt ?? now
+        return { type: 'ORDER_READY', orderId: order.id }
+      }
+      return { type: 'ORDER_UPDATED', orderId: order.id }
+    })
+  },
+
   /** Called from the KITCHEN when the food is taken to the table. */
   markDelivered(orderId: ID): void {
     db.mutate((draft) => {
@@ -342,7 +401,6 @@ export const orderService = {
 export interface BillPreview {
   subtotal: number
   discountAmount: number
-  taxAmount: number
   maxRedeemablePoints: number
   pointsRedeemed: number
   pointsValueRedeemed: number
@@ -353,29 +411,21 @@ export interface BillPreview {
 /**
  * The ONE place bill arithmetic lives: the settle sheet preview and the
  * actual settlement both call this, so what the admin sees is what gets
- * charged. Discount applies to the pre-tax subtotal (GST on the discounted
- * value); loyalty points come off the payable total.
+ * charged. The discount is a flat rupee amount off the subtotal; loyalty
+ * points then come off what remains. No tax is applied.
  */
 export function computeBillPreview(input: {
   rounds: Order[]
   settings: CafeSettings
-  discount?: BillDiscount
+  discountAmount?: number
   redeemPoints?: number
   availablePoints?: number
   hasCustomer?: boolean
 }): BillPreview {
-  const { settings, discount } = input
-  const subtotal = round2(input.rounds.reduce((s, o) => s + o.subtotal, 0))
-  const discountAmount = discount
-    ? round2(
-        discount.type === 'percent'
-          ? (subtotal * Math.min(Math.max(discount.value, 0), 100)) / 100
-          : Math.min(Math.max(discount.value, 0), subtotal),
-      )
-    : 0
-  const taxable = subtotal - discountAmount
-  const taxAmount = round2((taxable * settings.taxRatePercent) / 100)
-  const preTotal = round2(taxable + taxAmount)
+  const { settings } = input
+  const subtotal = round2(input.rounds.reduce((s, o) => s + o.total, 0))
+  const discountAmount = round2(clamp(input.discountAmount ?? 0, 0, subtotal))
+  const preTotal = round2(subtotal - discountAmount)
 
   const { enabled, rupeesPerPoint, pointsPer100 } = settings.loyalty
   const maxRedeemablePoints =
@@ -387,7 +437,26 @@ export function computeBillPreview(input: {
   const total = round2(preTotal - pointsValueRedeemed)
   const pointsToEarn = enabled && input.hasCustomer ? Math.floor(total / 100) * pointsPer100 : 0
 
-  return { subtotal, discountAmount, taxAmount, maxRedeemablePoints, pointsRedeemed, pointsValueRedeemed, total, pointsToEarn }
+  return { subtotal, discountAmount, maxRedeemablePoints, pointsRedeemed, pointsValueRedeemed, total, pointsToEarn }
+}
+
+/**
+ * Split a bill total across cash and UPI. `amount` is what the guest hands
+ * over in `method`; the other method covers the rest. Deriving the second
+ * leg instead of accepting two free inputs makes a bill that does not add
+ * up to the total unrepresentable.
+ */
+export function splitPayment(total: number, method: PaymentMethod, amount: number): BillPayments {
+  const paid = round2(clamp(amount, 0, total))
+  const rest = round2(total - paid)
+  return method === 'cash' ? { cash: paid, upi: rest } : { cash: rest, upi: paid }
+}
+
+/** Methods that actually contributed to a bill, in PAYMENT_METHODS order. */
+export function paidMethods(payments: BillPayments): Array<[PaymentMethod, number]> {
+  return PAYMENT_METHODS.map((m) => [m, payments[m]] as [PaymentMethod, number]).filter(
+    ([, amount]) => amount > 0,
+  )
 }
 
 /* Customer profiles are DERIVED from bills — no separate table to keep in
@@ -437,15 +506,16 @@ export function customerByPhone(bills: Bill[], phone: string): CustomerProfile |
 
 export const billService = {
   /**
-   * Settle a table: group all of its delivered rounds into one Bill (with
-   * optional discount and loyalty redemption), mark them paid, and free the
-   * table. Refuses while any round is still with the kitchen.
+   * Settle a table: group all of its delivered rounds into one Bill (with an
+   * optional flat discount and loyalty redemption), record how it was paid,
+   * and free the table. Refuses while any round is still with the kitchen.
    */
   settleTable(input: {
     tableId: ID
-    paymentMethod: PaymentMethod
+    /** Rupees taken in each method; must add up to the bill total. */
+    payments: BillPayments
     session: Session
-    discount?: BillDiscount
+    discountAmount?: number
     redeemPoints?: number
   }): Bill | null {
     let created: Bill | null = null
@@ -460,11 +530,16 @@ export const billService = {
       const preview = computeBillPreview({
         rounds: open,
         settings: draft.settings,
-        discount: input.discount,
+        discountAmount: input.discountAmount,
         redeemPoints: input.redeemPoints,
         availablePoints: available,
         hasCustomer: Boolean(phone),
       })
+      // Guard the invariant at the only door into the ledger: a bill whose
+      // payments do not add up to its total must never be written.
+      const tendered = round2(PAYMENT_METHODS.reduce((s, m) => s + (input.payments[m] || 0), 0))
+      if (Math.abs(tendered - preview.total) > 0.01) return
+
       const bill: Bill = {
         id: uid('bill'),
         billNumber: draft.counters.nextBillNumber,
@@ -475,16 +550,12 @@ export const billService = {
         customerName: first?.customerName,
         customerPhone: phone,
         subtotal: preview.subtotal,
-        discount: preview.discountAmount > 0 ? input.discount : undefined,
         discountAmount: preview.discountAmount,
-        taxLabel: draft.settings.taxLabel,
-        taxRatePercent: draft.settings.taxRatePercent,
-        taxAmount: preview.taxAmount,
         pointsRedeemed: preview.pointsRedeemed,
         pointsValueRedeemed: preview.pointsValueRedeemed,
         pointsEarned: preview.pointsToEarn,
         total: preview.total,
-        paymentMethod: input.paymentMethod,
+        payments: input.payments,
         settledAt: now,
         settledByUserId: input.session.userId,
         settledByName: input.session.name,
@@ -495,13 +566,17 @@ export const billService = {
         o.status = 'settled'
         o.settledAt = now
         o.billId = bill.id
-        o.paymentMethod = input.paymentMethod
       })
       created = bill
       return { type: 'BILL_SETTLED', billId: bill.id, tableId: input.tableId }
     })
     return created
   },
+}
+
+/** The bill a settled round belongs to, for history and receipts. */
+export function billForOrder(bills: Bill[], order: Order): Bill | undefined {
+  return order.billId ? bills.find((b) => b.id === order.billId) : undefined
 }
 
 /* ------------------------------- Kitchen -------------------------------- */
@@ -536,6 +611,8 @@ export const kitchenService = {
       if (status === 'preparing' && !item.startedAt) item.startedAt = now
       if (status === 'ready') item.readyAt = now
       if (status === 'preparing') item.readyAt = undefined
+      // A cancelled line stops being payable, so the round's total moves.
+      order.total = orderTotal(order.items)
 
       const events: RealtimeEvent[] = []
       if (status === 'preparing') events.push({ type: 'ITEM_STARTED', orderId, itemId })
@@ -636,8 +713,16 @@ export function activeOrdersForTable(orders: Order[], tableId: ID): Order[] {
     .sort((a, b) => a.placedAt.localeCompare(b.placedAt))
 }
 
-export function tableStatus(orders: Order[], table: CafeTable): 'available' | 'occupied' {
-  return activeOrdersForTable(orders, table.id).length > 0 ? 'occupied' : 'available'
+/**
+ * The floor-plan state of a table, most urgent first: food waiting to be
+ * carried out beats food still cooking, which beats a table that has eaten
+ * and owes money.
+ */
+export function floorState(rounds: Order[]): FloorState {
+  if (rounds.length === 0) return 'free'
+  if (rounds.some((o) => o.status === 'ready')) return 'ready'
+  if (rounds.some((o) => o.status === 'placed' || o.status === 'preparing')) return 'running'
+  return 'billing'
 }
 
 export function sortedActiveCategories(categories: Category[]): Category[] {

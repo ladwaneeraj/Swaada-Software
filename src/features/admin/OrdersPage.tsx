@@ -61,14 +61,14 @@ export function OrdersPage() {
             onClick={() => setFilter(f.value)}
             className={cn(
               'flex h-10 shrink-0 items-center gap-2 rounded-xl px-4 text-sm font-semibold transition-colors',
-              filter === f.value ? 'bg-ink-900 text-white' : 'bg-white text-ink-700 shadow-card hover:bg-cream-50',
+              filter === f.value ? 'bg-ink-900 text-white' : 'bg-white text-ink-700 shadow-card hover:bg-surface-50',
             )}
           >
             {f.label}
             <span
               className={cn(
                 'rounded-full px-1.5 text-xs tabular-nums',
-                filter === f.value ? 'bg-white/20' : 'bg-cream-200 text-ink-500',
+                filter === f.value ? 'bg-white/20' : 'bg-surface-200 text-ink-500',
               )}
             >
               {counts.get(f.value) ?? 0}
@@ -157,7 +157,7 @@ function OrderCard({
           )}
         </div>
 
-        <div className="flex-1 divide-y divide-cream-100 border-y border-cream-100">
+        <div className="flex-1 divide-y divide-surface-100 border-y border-surface-100">
           {order.items.map((item) => (
             <OrderItemLine key={item.id} item={item} muted={item.status === 'cancelled'} />
           ))}

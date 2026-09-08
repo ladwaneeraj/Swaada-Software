@@ -64,7 +64,7 @@ function Lane({
   return (
     <section className="flex min-h-0 flex-col">
       <div className="mb-3 flex items-center gap-2">
-        <h2 className={cn('text-sm font-bold uppercase tracking-wide', dark ? 'text-cream-300' : 'text-ink-500')}>
+        <h2 className={cn('text-sm font-bold uppercase tracking-wide', dark ? 'text-surface-300' : 'text-ink-500')}>
           {title}
         </h2>
         <Badge tone={tone}>{count}</Badge>
@@ -74,7 +74,7 @@ function Lane({
           <div
             className={cn(
               'grid h-28 place-items-center rounded-card border border-dashed text-sm',
-              dark ? 'border-white/15 text-cream-400' : 'border-cream-300 text-ink-300',
+              dark ? 'border-white/15 text-surface-400' : 'border-surface-300 text-ink-300',
             )}
           >
             Nothing here
@@ -89,7 +89,7 @@ function Lane({
 
 function Ticket({ order, now, dark }: { order: Order; now: number; dark: boolean }) {
   const mins = minutesSince(order.placedAt, now)
-  const urgency = mins >= 15 ? 'text-danger-600' : mins >= 8 ? 'text-warn-600' : dark ? 'text-cream-300' : 'text-ink-500'
+  const urgency = mins >= 15 ? 'text-danger-600' : mins >= 8 ? 'text-warn-600' : dark ? 'text-surface-300' : 'text-ink-500'
 
   // Group items by station so a future multi-station kitchen can split this
   // ticket; today one screen shows all stations with a tag per group.
@@ -107,7 +107,7 @@ function Ticket({ order, now, dark }: { order: Order; now: number; dark: boolean
       <header
         className={cn(
           'flex items-center justify-between gap-2 px-4 py-3',
-          order.status === 'ready' ? 'bg-ok-100' : 'bg-cream-100',
+          order.status === 'ready' ? 'bg-ok-100' : 'bg-surface-100',
         )}
       >
         <div className="flex items-baseline gap-2">
@@ -121,7 +121,7 @@ function Ticket({ order, now, dark }: { order: Order; now: number; dark: boolean
 
       <div className="px-4 py-2">
         {byStation.map(([stationName, items]) => (
-          <div key={stationName} className="border-b border-cream-100 py-2 last:border-0">
+          <div key={stationName} className="border-b border-surface-100 py-2 last:border-0">
             <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-ink-300">{stationName}</p>
             {items.map((item) => (
               <TicketItem key={item.id} order={order} item={item} />
@@ -142,7 +142,7 @@ function Ticket({ order, now, dark }: { order: Order; now: number; dark: boolean
         )}
         {order.status === 'preparing' && (
           <div className="space-y-2">
-            <div className="h-1.5 overflow-hidden rounded-full bg-cream-200">
+            <div className="h-1.5 overflow-hidden rounded-full bg-surface-200">
               <div
                 className="h-full rounded-full bg-ok-600 transition-all"
                 style={{ width: `${activeCount === 0 ? 0 : (readyCount / activeCount) * 100}%` }}
@@ -256,14 +256,14 @@ function TicketItem({ order, item }: { order: Order; item: OrderItem }) {
       aria-label={`${item.name}: mark ${ready ? 'not ready' : 'ready'}`}
       className={cn(
         'flex w-full items-start gap-3 rounded-lg px-1 py-1.5 text-left',
-        interactive && 'hover:bg-cream-50',
+        interactive && 'hover:bg-surface-50',
         item.status === 'cancelled' && 'opacity-40',
       )}
     >
       <span
         className={cn(
           'mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border-2 transition-colors',
-          ready ? 'border-ok-600 bg-ok-600 text-white' : 'border-cream-300 bg-white text-transparent',
+          ready ? 'border-ok-600 bg-ok-600 text-white' : 'border-surface-300 bg-white text-transparent',
         )}
         aria-hidden
       >

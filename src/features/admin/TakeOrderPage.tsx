@@ -1,8 +1,8 @@
-import { ArrowLeft, Minus, Plus, Search, ShoppingBag, Trash2 } from 'lucide-react'
+import { ArrowLeft, Minus, Plus, Search, ShoppingBag, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useToasts } from '@/components/toast'
-import { Badge, Button, Card, Input, Modal, Textarea, VegMark } from '@/components/ui'
+import { Button, Card, Input, Modal, Textarea, VegMark } from '@/components/ui'
 import { assetUrl, byDisplayOrder, cn, formatINR } from '@/lib/utils'
 import {
   itemsForCategory,
@@ -17,10 +17,14 @@ import { useAppStore } from '@/store/useAppStore'
 import type { ID, MenuItem, ModifierGroup, ModifierOption } from '@/types'
 
 /**
- * Order-taking screen, optimised for speed:
- *  - ADD on a card adds instantly with default selections
- *  - tapping the card body opens the customization sheet
- *  - "/" focuses search, Enter adds the first match, Esc closes the sheet
+ * Order-taking screen, laid out as a billing terminal: categories on the
+ * left, the menu in the middle, the running bill on the right.
+ *
+ * Speed rules:
+ *  - tapping an item adds it immediately with its default options
+ *  - the slider icon opens the options sheet when a choice matters
+ *  - quantities are corrected in the bill, not on the menu
+ *  - "/" focuses search, Enter adds the first match, Esc clears it
  */
 
 interface CartLine {
@@ -125,18 +129,6 @@ export function TakeOrderPage() {
     [defaultSelections, upsertLine],
   )
 
-  const decrementItem = useCallback((itemId: ID) => {
-    setLines((prev) => {
-      const idx = [...prev].reverse().findIndex((l) => l.menuItem.id === itemId)
-      if (idx === -1) return prev
-      const realIdx = prev.length - 1 - idx
-      const line = prev[realIdx]
-      if (!line) return prev
-      if (line.quantity <= 1) return prev.filter((_, i) => i !== realIdx)
-      return prev.map((l, i) => (i === realIdx ? { ...l, quantity: l.quantity - 1 } : l))
-    })
-  }, [])
-
   // Keyboard shortcuts: "/" focuses search, Enter (in search) adds first match.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -149,6 +141,16 @@ export function TakeOrderPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  /** True when a required option group can push the price up ("from ₹209"). */
+  const pricedFrom = useCallback(
+    (item: MenuItem) =>
+      item.modifierGroupIds.some((gid) => {
+        const g = groupsById.get(gid)
+        return g?.required && optionsForGroup(modifierOptions, gid).some((o) => o.priceAdjustment > 0)
+      }),
+    [groupsById, modifierOptions],
+  )
+
   const qtyByItem = useMemo(() => {
     const map = new Map<ID, number>()
     lines.forEach((l) => map.set(l.menuItem.id, (map.get(l.menuItem.id) ?? 0) + l.quantity))
@@ -156,13 +158,11 @@ export function TakeOrderPage() {
   }, [lines])
 
   const cartCount = lines.reduce((n, l) => n + l.quantity, 0)
-  const subtotal = lines.reduce(
+  const total = lines.reduce(
     (sum, l) =>
       sum + (l.menuItem.basePrice + l.modifiers.reduce((s, m) => s + m.option.priceAdjustment, 0)) * l.quantity,
     0,
   )
-  const taxAmount = (subtotal * settings.taxRatePercent) / 100
-  const total = subtotal + taxAmount
 
   const placeOrder = () => {
     if (!session || !table || lines.length === 0) return
@@ -185,7 +185,7 @@ export function TakeOrderPage() {
   // Optional customer capture on the table's first round (configurable in
   // Settings). Shared by the desktop cart panel and the mobile cart sheet.
   const customerSlot = askCustomer ? (
-    <div className="space-y-2 border-t border-cream-200 py-3">
+    <div className="space-y-2 border-t border-surface-200 py-3">
       <p className="text-xs font-bold uppercase tracking-wide text-ink-500">
         Customer <span className="font-normal normal-case">(optional)</span>
       </p>
@@ -222,49 +222,113 @@ export function TakeOrderPage() {
     )
   }
 
+  const menuBody =
+    visibleItems.length === 0 ? (
+      <p className="py-16 text-center text-sm text-ink-500">No items match “{query}”.</p>
+    ) : query.trim() || activeCategoryId !== 'all' ? (
+      <ItemGrid
+        items={visibleItems}
+        qtyByItem={qtyByItem}
+        pricedFrom={pricedFrom}
+        onAdd={quickAdd}
+        onCustomize={(item) => setSheet({ item })}
+      />
+    ) : (
+      // "All items" keeps the menu's own order and labels each run, so the
+      // list reads like the printed menu instead of one undifferentiated wall.
+      activeCategories.map((c) => {
+        const list = itemsForCategory(orderableItems, c.id)
+        if (list.length === 0) return null
+        return (
+          <section key={c.id} className="mb-3">
+            <h3 className="sticky top-0 z-10 -mx-0.5 mb-2 bg-surface-100/90 px-0.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-ink-500 backdrop-blur">
+              <span aria-hidden>{c.icon}</span> {c.name}
+            </h3>
+            <ItemGrid
+              items={list}
+              qtyByItem={qtyByItem}
+              pricedFrom={pricedFrom}
+              onAdd={quickAdd}
+              onCustomize={(item) => setSheet({ item })}
+            />
+          </section>
+        )
+      })
+    )
+
   return (
-    <div className="flex flex-col gap-5 xl:flex-row">
-      {/* ---------------------------- Menu side ---------------------------- */}
-      <div className="min-w-0 flex-1 pb-24 xl:pb-0">
-        <div className="mb-4 flex items-center gap-3">
+    <div className="flex flex-col gap-3 xl:h-[calc(100dvh-6.25rem)] xl:flex-row">
+      {/* --------------------------- Category rail -------------------------- */}
+      <aside className="hidden w-44 shrink-0 xl:flex xl:flex-col">
+        <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <p className="border-b border-surface-200 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-ink-500">
+            Categories
+          </p>
+          <div className="min-h-0 flex-1 overflow-y-auto p-1.5" role="tablist" aria-label="Categories">
+            <CategoryRow
+              label="All items"
+              icon="✦"
+              count={orderableItems.length}
+              active={activeCategoryId === 'all' && !query.trim()}
+              onClick={() => {
+                setActiveCategoryId('all')
+                setQuery('')
+              }}
+            />
+            {activeCategories.map((c) => (
+              <CategoryRow
+                key={c.id}
+                label={c.name}
+                icon={c.icon}
+                count={itemsForCategory(orderableItems, c.id).length}
+                active={activeCategoryId === c.id && !query.trim()}
+                onClick={() => {
+                  setActiveCategoryId(c.id)
+                  setQuery('')
+                }}
+              />
+            ))}
+          </div>
+        </Card>
+      </aside>
+
+      {/* ------------------------------- Menu ------------------------------- */}
+      <div className="flex min-w-0 flex-1 flex-col gap-2.5 pb-24 xl:min-h-0 xl:pb-0">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => navigate('/admin/tables')}
             aria-label="Back to tables"
-            className="grid size-10 shrink-0 place-items-center rounded-xl bg-white shadow-card hover:bg-cream-50"
+            className="grid size-10 shrink-0 place-items-center rounded-control bg-white shadow-card ring-1 ring-surface-200 transition-all hover:shadow-lift"
           >
-            <ArrowLeft className="size-5" />
+            <ArrowLeft className="size-4" />
           </button>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight">
-              Table {table.name} <span className="font-normal text-ink-500">· {table.zone}</span>
-            </h1>
-            <p className="text-xs text-ink-500">
-              Round {roundNumber}
-              {roundNumber > 1 && ` · bill so far ${formatINR(billSoFar)}`}
-            </p>
+          <h1 className="shrink-0 text-sm font-bold">
+            Table {table.name}
+            <span className="ml-1.5 text-xs font-normal text-ink-500">
+              round {roundNumber}
+              {roundNumber > 1 && ` · so far ${formatINR(billSoFar)}`}
+            </span>
+          </h1>
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-300" />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && visibleItems[0]) quickAdd(visibleItems[0])
+                if (e.key === 'Escape') setQuery('')
+              }}
+              placeholder="Search the menu…  ( / )"
+              aria-label="Search menu"
+              className="h-10 w-full rounded-control border border-surface-200 bg-white pl-9 pr-3 text-[13px] shadow-card transition-shadow placeholder:text-ink-300 focus:border-accent-500 focus:outline-none focus:ring-4 focus:ring-accent-500/10"
+            />
           </div>
         </div>
 
-        {/* Search */}
-        <div className="relative mb-3">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-ink-300" />
-          <input
-            ref={searchRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && visibleItems[0]) quickAdd(visibleItems[0])
-              if (e.key === 'Escape') setQuery('')
-            }}
-            placeholder="Search menu…  ( / )"
-            aria-label="Search menu"
-            className="h-12 w-full rounded-xl border border-cream-300 bg-white pl-10 pr-4 text-[15px] shadow-card placeholder:text-ink-300 focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20"
-          />
-        </div>
-
-        {/* Category chips */}
-        <div className="no-scrollbar -mx-1 mb-4 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Categories">
+        {/* Categories as chips below the rail's breakpoint */}
+        <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 xl:hidden" role="tablist" aria-label="Categories">
           <CategoryChip
             label="All"
             icon="✦"
@@ -288,86 +352,53 @@ export function TakeOrderPage() {
           ))}
         </div>
 
-        {/* Product grid */}
-        {visibleItems.length === 0 ? (
-          <p className="py-16 text-center text-sm text-ink-500">No items match “{query}”.</p>
-        ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(8.25rem,1fr))] gap-2 sm:grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] sm:gap-3">
-            {visibleItems.map((item) => (
-              <ProductCard
-                key={item.id}
-                item={item}
-                categoryIcon={activeCategories.find((c) => c.id === item.categoryId)?.icon ?? '🍽'}
-                qtyInCart={qtyByItem.get(item.id) ?? 0}
-                hasPricedSize={item.modifierGroupIds.some((gid) => {
-                  const g = groupsById.get(gid)
-                  return g?.required && optionsForGroup(modifierOptions, gid).some((o) => o.priceAdjustment > 0)
-                })}
-                onQuickAdd={() => quickAdd(item)}
-                onDecrement={() => decrementItem(item.id)}
-                onCustomize={() => item.availability === 'available' && setSheet({ item })}
-              />
-            ))}
-          </div>
-        )}
+        <div className="min-h-0 flex-1 xl:overflow-y-auto xl:pr-1">{menuBody}</div>
       </div>
 
-      {/* ---------------------------- Cart side ---------------------------- */}
-      <aside className="hidden w-96 shrink-0 xl:block">
-        {/* Capped to the viewport so the Place order button is always visible;
-            only the items list scrolls. */}
-        <div className="sticky top-6 max-h-[calc(100dvh-3rem)]">
-          <CartPanel
-            lines={lines}
-            tableName={table.name}
-            roundNumber={roundNumber}
-            customerSlot={customerSlot}
-            subtotal={subtotal}
-            taxAmount={taxAmount}
-            taxLabel={settings.taxLabel}
-            taxRate={settings.taxRatePercent}
-            total={total}
-            onEdit={(l) => setSheet({ item: l.menuItem, editingKey: l.key })}
-            onRemove={(l) => setLines((prev) => prev.filter((x) => x.key !== l.key))}
-            onQty={(l, d) =>
-              setLines((prev) =>
-                prev
-                  .map((x) => (x.key === l.key ? { ...x, quantity: Math.max(0, x.quantity + d) } : x))
-                  .filter((x) => x.quantity > 0),
-              )
-            }
-            onPlace={placeOrder}
-          />
-        </div>
+      {/* ------------------------------- Bill ------------------------------- */}
+      <aside className="hidden w-[21rem] shrink-0 xl:flex xl:flex-col">
+        <BillPanel
+          lines={lines}
+          tableName={table.name}
+          roundNumber={roundNumber}
+          customerSlot={customerSlot}
+          total={total}
+          onEdit={(l) => setSheet({ item: l.menuItem, editingKey: l.key })}
+          onRemove={(l) => setLines((prev) => prev.filter((x) => x.key !== l.key))}
+          onQty={(l, d) =>
+            setLines((prev) =>
+              prev
+                .map((x) => (x.key === l.key ? { ...x, quantity: Math.max(0, x.quantity + d) } : x))
+                .filter((x) => x.quantity > 0),
+            )
+          }
+          onPlace={placeOrder}
+        />
       </aside>
 
-      {/* Mobile cart bar */}
+      {/* Bill as a bottom bar + sheet on smaller screens */}
       {cartCount > 0 && (
         <div className="fixed inset-x-4 bottom-4 z-40 xl:hidden">
           <button
             type="button"
             onClick={() => setCartOpen(true)}
-            className="flex h-14 w-full items-center justify-between rounded-2xl bg-ink-900 px-5 text-white shadow-pop"
+            className="flex h-13 w-full items-center justify-between rounded-2xl bg-gradient-to-b from-accent-500 to-accent-600 px-5 text-white shadow-pop"
           >
             <span className="flex items-center gap-2 text-sm font-bold">
-              <ShoppingBag className="size-5" /> {cartCount} item{cartCount > 1 ? 's' : ''}
+              <ShoppingBag className="size-4" /> {cartCount} item{cartCount > 1 ? 's' : ''}
             </span>
-            <span className="text-base font-bold tabular-nums">{formatINR(total)}</span>
+            <span className="text-sm font-bold tabular-nums">{formatINR(total)}</span>
           </button>
         </div>
       )}
 
       <Modal open={cartOpen} onClose={() => setCartOpen(false)} title={`Table ${table.name} · round ${roundNumber}`} position="sheet">
-        <CartPanel
+        <BillPanel
           bare
           lines={lines}
           tableName={table.name}
           roundNumber={roundNumber}
           customerSlot={customerSlot}
-          subtotal={subtotal}
-          taxAmount={taxAmount}
-          taxLabel={settings.taxLabel}
-          taxRate={settings.taxRatePercent}
           total={total}
           onEdit={(l) => {
             setCartOpen(false)
@@ -409,7 +440,42 @@ export function TakeOrderPage() {
   )
 }
 
-/* ----------------------------- Category chip ----------------------------- */
+/* ------------------------------ Categories ------------------------------- */
+
+function CategoryRow({
+  label,
+  icon,
+  count,
+  active,
+  onClick,
+}: {
+  label: string
+  icon: string
+  count: number
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={cn(
+        'flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[13px] font-semibold transition-all duration-150',
+        active
+          ? 'bg-gradient-to-b from-accent-500 to-accent-600 text-white shadow-accent'
+          : 'text-ink-700 hover:bg-surface-100',
+      )}
+    >
+      <span aria-hidden className="text-sm">
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className={cn('text-[11px] tabular-nums', active ? 'text-white/75' : 'text-ink-300')}>{count}</span>
+    </button>
+  )
+}
 
 function CategoryChip({ label, icon, active, onClick }: { label: string; icon: string; active: boolean; onClick: () => void }) {
   return (
@@ -419,121 +485,154 @@ function CategoryChip({ label, icon, active, onClick }: { label: string; icon: s
       aria-selected={active}
       onClick={onClick}
       className={cn(
-        'flex h-11 shrink-0 items-center gap-2 rounded-xl px-4 text-sm font-semibold transition-colors',
-        active ? 'bg-ink-900 text-white shadow-card' : 'bg-white text-ink-700 shadow-card hover:bg-cream-50',
+        'flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-semibold transition-all',
+        active ? 'bg-gradient-to-b from-accent-500 to-accent-600 text-white shadow-accent' : 'bg-white text-ink-700 shadow-card ring-1 ring-surface-200',
       )}
     >
-      <span aria-hidden>{icon}</span>
+      <span aria-hidden className="text-sm">
+        {icon}
+      </span>
       {label}
     </button>
   )
 }
 
-/* ------------------------------ Product card ----------------------------- */
+/* ------------------------------- Item tiles ------------------------------ */
 
-function ProductCard({
+function ItemGrid({
+  items,
+  qtyByItem,
+  pricedFrom,
+  onAdd,
+  onCustomize,
+}: {
+  items: MenuItem[]
+  qtyByItem: Map<ID, number>
+  pricedFrom: (item: MenuItem) => boolean
+  onAdd: (item: MenuItem) => void
+  onCustomize: (item: MenuItem) => void
+}) {
+  return (
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-1.5 sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]">
+      {items.map((item) => (
+        <ItemTile
+          key={item.id}
+          item={item}
+          qtyInCart={qtyByItem.get(item.id) ?? 0}
+          hasPricedSize={pricedFrom(item)}
+          onAdd={() => onAdd(item)}
+          onCustomize={() => onCustomize(item)}
+        />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * One menu item. Tapping the tile adds it straight away with its default
+ * options, which is what makes punching an order fast; the pencil opens the
+ * options sheet for the times that matters, and quantities are corrected in
+ * the bill on the right.
+ */
+function ItemTile({
   item,
-  categoryIcon,
   qtyInCart,
   hasPricedSize,
-  onQuickAdd,
-  onDecrement,
+  onAdd,
   onCustomize,
 }: {
   item: MenuItem
-  categoryIcon: string
   qtyInCart: number
   hasPricedSize: boolean
-  onQuickAdd: () => void
-  onDecrement: () => void
+  onAdd: () => void
   onCustomize: () => void
 }) {
   const unavailable = item.availability !== 'available'
   const customizable = item.modifierGroupIds.length > 0
+  const [imageBroken, setImageBroken] = useState(false)
+  const showImage = Boolean(item.image) && !imageBroken
+
   return (
-    <Card
-      testId={`product-${item.id}`}
-      className={cn('group relative flex flex-col overflow-hidden transition-shadow hover:shadow-pop', unavailable && 'opacity-60')}
+    <div
+      className={cn(
+        'group relative flex items-stretch overflow-hidden rounded-xl bg-white shadow-card ring-1 transition-all duration-150',
+        unavailable
+          ? 'opacity-55 ring-surface-200'
+          : 'ring-surface-200 hover:-translate-y-0.5 hover:shadow-lift hover:ring-accent-500/50',
+        qtyInCart > 0 && 'bg-accent-50 ring-accent-500',
+      )}
     >
       <button
         type="button"
-        onClick={onCustomize}
+        onClick={onAdd}
         disabled={unavailable}
-        className="flex flex-1 flex-col text-left"
-        aria-label={customizable ? `Customize ${item.name}` : item.name}
+        className="flex min-w-0 flex-1 items-center gap-2.5 p-2 text-left"
+        aria-label={`Add ${item.name}`}
       >
-        <div className="relative flex h-14 items-center justify-center bg-gradient-to-br from-cream-100 to-cream-200 text-2xl sm:h-24 sm:text-4xl" aria-hidden>
-          {item.image ? (
-            <img
-              src={assetUrl(item.image)}
-              alt=""
-              loading="lazy"
-              // Bundled illustrations sit inside the strip; real photos
-              // (http URLs) fill it edge to edge.
-              className={cn(
-                'h-full w-full transition-transform duration-300 group-hover:scale-110',
-                item.image.startsWith('http') ? 'object-cover' : 'object-contain p-1 sm:p-1.5',
-              )}
-            />
-          ) : (
-            <span>{categoryIcon}</span>
-          )}
-          <div className="absolute left-2 top-2 hidden gap-1 sm:flex">
-            {item.isPopular && <Badge tone="accent">Popular</Badge>}
-            {item.isRecommended && <Badge tone="ok">Pick</Badge>}
-          </div>
-        </div>
-        {/* Deliberately no description here — cards stay short so orders go
-            in fast. The description shows in the customize sheet instead. */}
-        <div className="flex flex-1 flex-col p-2 sm:p-3">
-          <p className="flex items-start gap-1.5 text-[13px] font-bold leading-snug sm:text-sm">
-            <VegMark isVeg={item.isVegetarian} className="mt-0.5 size-3.5 sm:size-4" />
-            {item.name}
-          </p>
-          <p className="mt-auto pt-1.5 text-[13px] font-bold tabular-nums sm:text-sm">
+        {showImage && item.image ? (
+          <img
+            src={assetUrl(item.image)}
+            alt=""
+            loading="lazy"
+            onError={() => setImageBroken(true)}
+            className={cn(
+              'size-10 shrink-0 rounded-lg bg-surface-100',
+              item.image.endsWith('.svg') ? 'object-contain p-0.5' : 'object-cover',
+            )}
+          />
+        ) : (
+          <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-surface-100 text-ink-300" aria-hidden>
+            <VegMark isVeg={item.isVegetarian} className="size-3.5" />
+          </span>
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-start gap-1">
+            {showImage && <VegMark isVeg={item.isVegetarian} className="mt-px size-3 shrink-0" />}
+            <span className="line-clamp-2 text-[12px] font-semibold leading-tight">{item.name}</span>
+          </span>
+          <span className="mt-0.5 block text-[12px] font-bold tabular-nums">
             {hasPricedSize && <span className="font-normal text-ink-500">from </span>}
             {formatINR(item.basePrice)}
-          </p>
-        </div>
+          </span>
+        </span>
       </button>
 
-      <div className="px-2 pb-2 sm:px-3 sm:pb-3">
-        {unavailable ? (
-          <div className="grid h-9 place-items-center rounded-lg bg-cream-200 text-[11px] font-bold uppercase tracking-wide text-ink-500 sm:h-10 sm:rounded-xl sm:text-xs">
-            Unavailable
-          </div>
-        ) : qtyInCart === 0 ? (
-          <Button size="sm" className="h-9 w-full sm:h-10" onClick={onQuickAdd}>
-            <Plus className="size-4" /> Add
-          </Button>
-        ) : (
-          <div className="flex h-9 items-center justify-between rounded-lg bg-ink-900 px-1 text-white sm:h-10 sm:rounded-xl">
-            <button type="button" onClick={onDecrement} aria-label={`Remove one ${item.name}`} className="grid size-7 place-items-center rounded-md hover:bg-white/10 sm:size-8 sm:rounded-lg">
-              <Minus className="size-4" />
+      {unavailable ? (
+        <span className="grid w-7 shrink-0 place-items-center bg-surface-100 text-[9px] font-bold uppercase text-ink-300">
+          Out
+        </span>
+      ) : (
+        <span className="flex w-7 shrink-0 flex-col items-center justify-center gap-1">
+          {qtyInCart > 0 && (
+            <span className="grid size-5 place-items-center rounded-full bg-accent-500 text-[10px] font-bold text-white tabular-nums">
+              {qtyInCart}
+            </span>
+          )}
+          {customizable && (
+            <button
+              type="button"
+              onClick={onCustomize}
+              title={`Options for ${item.name}`}
+              aria-label={`Options for ${item.name}`}
+              className="grid size-5 place-items-center rounded-md text-ink-300 transition-colors hover:bg-surface-200 hover:text-ink-700"
+            >
+              <SlidersHorizontal className="size-3" />
             </button>
-            <span className="text-sm font-bold tabular-nums">{qtyInCart}</span>
-            <button type="button" onClick={onQuickAdd} aria-label={`Add one ${item.name}`} className="grid size-7 place-items-center rounded-md hover:bg-white/10 sm:size-8 sm:rounded-lg">
-              <Plus className="size-4" />
-            </button>
-          </div>
-        )}
-      </div>
-    </Card>
+          )}
+        </span>
+      )}
+    </div>
   )
 }
 
-/* ------------------------------- Cart panel ------------------------------ */
+/* -------------------------------- Bill panel ----------------------------- */
 
-function CartPanel({
+function BillPanel({
   bare = false,
   lines,
   tableName,
   roundNumber,
   customerSlot,
-  subtotal,
-  taxAmount,
-  taxLabel,
-  taxRate,
   total,
   onEdit,
   onRemove,
@@ -545,96 +644,104 @@ function CartPanel({
   tableName: string
   roundNumber: number
   customerSlot?: React.ReactNode
-  subtotal: number
-  taxAmount: number
-  taxLabel: string
-  taxRate: number
   total: number
   onEdit: (line: CartLine) => void
   onRemove: (line: CartLine) => void
   onQty: (line: CartLine, delta: number) => void
   onPlace: () => void
 }) {
+  const count = lines.reduce((n, l) => n + l.quantity, 0)
   const body = (
     <>
       {!bare && (
-        <div className="border-b border-cream-200 px-5 py-4">
-          <p className="text-base font-bold">
+        <div className="flex items-baseline justify-between gap-2 border-b border-surface-200 px-3.5 py-3">
+          <p className="text-[13px] font-bold">
             Table {tableName} <span className="font-normal text-ink-500">· round {roundNumber}</span>
           </p>
-          <p className="text-xs text-ink-500">{lines.length === 0 ? 'No items yet' : `${lines.reduce((n, l) => n + l.quantity, 0)} items`}</p>
+          <p className="text-[11px] text-ink-500">{count === 0 ? 'empty' : `${count} item${count > 1 ? 's' : ''}`}</p>
         </div>
       )}
-      <div className={cn('min-h-0 flex-1 overflow-y-auto py-2', !bare && 'px-5')}>
+
+      {/* Column headings turn the running order into something that reads
+          like the bill it becomes. */}
+      <div className={cn('flex items-center gap-2 border-b border-surface-200 bg-surface-100/70 py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-ink-500', bare ? 'px-1' : 'px-3.5')}>
+        <span className="flex-1">Item</span>
+        <span className="w-[4.5rem] text-center">Qty</span>
+        <span className="w-14 text-right">Amount</span>
+        <span className="w-5" />
+      </div>
+
+      <div className={cn('min-h-0 flex-1 overflow-y-auto', bare ? 'px-1' : 'px-3.5')}>
         {lines.length === 0 ? (
-          <p className="py-10 text-center text-sm text-ink-500">Tap items on the left to build the order.</p>
+          <p className="py-10 text-center text-[13px] text-ink-500">Tap items to build the order.</p>
         ) : (
           lines.map((line) => {
             const unit = line.menuItem.basePrice + line.modifiers.reduce((s, m) => s + m.option.priceAdjustment, 0)
             return (
-              <div key={line.key} className="border-b border-cream-100 py-3 last:border-0">
-                <div className="flex items-start justify-between gap-2">
-                  <button type="button" onClick={() => onEdit(line)} className="min-w-0 text-left">
-                    <p className="flex items-center gap-1.5 text-sm font-bold">
-                      <VegMark isVeg={line.menuItem.isVegetarian} className="size-3.5" />
-                      {line.menuItem.name}
-                    </p>
-                    {line.modifiers.length > 0 && (
-                      <p className="mt-0.5 text-xs text-ink-500">{line.modifiers.map((m) => m.option.name).join(' · ')}</p>
-                    )}
-                    {line.specialInstructions && (
-                      <p className="mt-0.5 text-xs italic text-accent-600">“{line.specialInstructions}”</p>
-                    )}
+              <div key={line.key} className="flex items-center gap-2 border-b border-surface-200 py-1.5 last:border-0">
+                <button type="button" onClick={() => onEdit(line)} className="min-w-0 flex-1 text-left">
+                  <span className="flex items-center gap-1.5">
+                    <VegMark isVeg={line.menuItem.isVegetarian} className="size-3 shrink-0" />
+                    <span className="truncate text-[12px] font-semibold">{line.menuItem.name}</span>
+                  </span>
+                  {(line.modifiers.length > 0 || line.specialInstructions) && (
+                    <span className="mt-0.5 block truncate text-[10px] text-ink-500">
+                      {[...line.modifiers.map((m) => m.option.name), line.specialInstructions].filter(Boolean).join(' · ')}
+                    </span>
+                  )}
+                </button>
+
+                <div className="flex w-[4.5rem] shrink-0 items-center justify-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => onQty(line, -1)}
+                    aria-label={`One less ${line.menuItem.name}`}
+                    className="grid size-6 place-items-center rounded-lg bg-white text-ink-500 shadow-card ring-1 ring-surface-200 transition-all hover:text-ink-900 hover:shadow-lift"
+                  >
+                    <Minus className="size-3" />
                   </button>
-                  <button type="button" onClick={() => onRemove(line)} aria-label={`Remove ${line.menuItem.name}`} className="grid size-8 shrink-0 place-items-center rounded-lg text-ink-300 hover:bg-cream-100 hover:text-danger-600">
-                    <Trash2 className="size-4" />
+                  <span className="w-5 text-center text-[12px] font-bold tabular-nums">{line.quantity}</span>
+                  <button
+                    type="button"
+                    onClick={() => onQty(line, 1)}
+                    aria-label={`One more ${line.menuItem.name}`}
+                    className="grid size-6 place-items-center rounded-lg bg-white text-ink-500 shadow-card ring-1 ring-surface-200 transition-all hover:text-ink-900 hover:shadow-lift"
+                  >
+                    <Plus className="size-3" />
                   </button>
                 </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <div className="flex items-center gap-1 rounded-lg bg-cream-100 p-0.5">
-                    <button type="button" onClick={() => onQty(line, -1)} aria-label="Decrease quantity" className="grid size-8 place-items-center rounded-md hover:bg-white">
-                      <Minus className="size-3.5" />
-                    </button>
-                    <span className="w-6 text-center text-sm font-bold tabular-nums">{line.quantity}</span>
-                    <button type="button" onClick={() => onQty(line, 1)} aria-label="Increase quantity" className="grid size-8 place-items-center rounded-md hover:bg-white">
-                      <Plus className="size-3.5" />
-                    </button>
-                  </div>
-                  <span className="text-sm font-bold tabular-nums">{formatINR(unit * line.quantity)}</span>
-                </div>
+
+                <span className="w-14 shrink-0 text-right text-[12px] font-bold tabular-nums">
+                  {formatINR(unit * line.quantity)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onRemove(line)}
+                  aria-label={`Remove ${line.menuItem.name}`}
+                  className="grid size-5 shrink-0 place-items-center rounded-md text-ink-300 transition-colors hover:bg-danger-100 hover:text-danger-600"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
               </div>
             )
           })
         )}
       </div>
-      <div className={cn('border-t border-cream-200', bare ? 'pt-2' : 'px-5 pb-4 pt-2')}>
+
+      <div className={cn('border-t border-surface-200 bg-surface-100/50', bare ? 'pt-2' : 'px-3.5 pb-3.5 pt-2')}>
         {customerSlot}
-        <div className="space-y-1 pt-2 text-sm">
-          <div className="flex justify-between text-ink-500">
-            <span>Subtotal</span>
-            <span className="tabular-nums">{formatINR(subtotal)}</span>
-          </div>
-          <div className="flex justify-between text-ink-500">
-            <span>
-              {taxLabel} ({taxRate}%)
-            </span>
-            <span className="tabular-nums">{formatINR(taxAmount)}</span>
-          </div>
-          <div className="flex justify-between pt-1 text-base font-bold">
-            <span>Total</span>
-            <span className="tabular-nums">{formatINR(total)}</span>
-          </div>
+        <div className="flex items-baseline justify-between py-2">
+          <span className="text-[13px] font-bold">Round total</span>
+          <span className="text-lg font-bold tabular-nums">{formatINR(total)}</span>
         </div>
-        <Button size="lg" className="mt-4 w-full" disabled={lines.length === 0} onClick={onPlace}>
+        <Button size="lg" className="w-full" disabled={lines.length === 0} onClick={onPlace}>
           Place order · {formatINR(total)}
         </Button>
       </div>
     </>
   )
   if (bare) return <div className="flex flex-col">{body}</div>
-  // Capped to the viewport (it sits in a sticky sidebar) so the totals and
-  // Place order button never scroll out of reach; only the item list scrolls.
-  return <Card className="flex max-h-[calc(100dvh-3rem)] flex-col overflow-hidden">{body}</Card>
+  return <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">{body}</Card>
 }
 
 /* --------------------------- Customization sheet -------------------------- */
@@ -723,7 +830,7 @@ function CustomizeSheet({
       position="sheet"
       footer={
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1 rounded-xl bg-cream-100 p-1">
+          <div className="flex items-center gap-1 rounded-xl bg-surface-100 p-1">
             <button type="button" onClick={() => setQty((q) => Math.max(1, q - 1))} aria-label="Decrease quantity" className="grid size-10 place-items-center rounded-lg hover:bg-white">
               <Minus className="size-4" />
             </button>
@@ -772,7 +879,7 @@ function CustomizeSheet({
                       'flex h-10 items-center gap-1.5 rounded-xl border px-3.5 text-sm font-semibold transition-colors disabled:opacity-40',
                       active
                         ? 'border-accent-500 bg-accent-50 text-accent-600'
-                        : 'border-cream-300 bg-white text-ink-700 hover:border-cream-400',
+                        : 'border-surface-300 bg-white text-ink-700 hover:border-surface-400',
                     )}
                   >
                     {option.name}

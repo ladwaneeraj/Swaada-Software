@@ -35,8 +35,9 @@ to customise), French Fries → Place order. In the kitchen tab: Start
 preparing → tap items as they finish → the ticket flips to READY by itself →
 tap "Delivered to table" (the kitchen delivers; admin doesn't). Back in
 admin, tap L3 again: the running bill opens — add more rounds, or once
-everything is delivered, pick Cash or UPI and Take payment. That settles all
-rounds into one bill and frees the table. Also try: marking an item out of
+everything is delivered, type a ₹ discount if one is due, split the amount
+between Cash and UPI (type one box, the other fills the rest) and Take
+payment. That settles all rounds into one bill and frees the table. Also try: marking an item out of
 stock in Menu (it becomes unselectable on the order screen immediately),
 search ("coffee" also finds Cappuccino/Latte/Mocha via configurable
 keywords), drag-reordering categories, and cancelling a round that hasn't
@@ -63,7 +64,7 @@ Rules the code follows:
 
 - **Nothing menu-related is hard-coded in components.** Categories, items,
   prices, images, availability, ordering, veg flags, prep times, badges,
-  modifier groups, stations, tables, tax and even status labels/colors come
+  modifier groups, stations, tables and even status labels/colors come
   from data (`src/data/seed.ts`) or config maps (`src/lib/statusMeta.ts`).
 - **Components never touch persistence.** They call service functions;
   services mutate the mock DB and emit typed events (`ORDER_CREATED`,
@@ -109,11 +110,14 @@ Components should not need edits for any of the above.
 
 - Realtime sync is same-browser only (BroadcastChannel); two devices need the
   real backend.
-- Payments record the method (cash/UPI) only — no UPI integration, change
-  calculation, split bills, or refunds yet. Delivered rounds can't be
-  cancelled; a void/refund flow is future work.
-- Images are configurable in the data model (`image` on items/categories) but
-  the seed ships without photos; cards fall back to the category icon.
+- Payments record how much came in as cash and how much as UPI, and the two
+  legs always add up to the bill — but there is no UPI integration, change
+  calculation or refund flow yet.
+- Bills are charged at menu price: there is no tax anywhere in the system.
+- Menu photos are drop-in: a file in `src/assets/menu-photos/` named after an
+  item id (`paneer-pizza.webp`) replaces that item's illustration on the next
+  build. Items with no photo keep the bundled illustration; items with
+  neither show the category icon.
 - The connection badge reports browser online/offline, standing in for socket
   state until a backend exists.
 

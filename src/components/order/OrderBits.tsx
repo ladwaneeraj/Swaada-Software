@@ -32,6 +32,14 @@ export function OrderItemLine({
           {item.specialInstructions && (
             <p className="mt-0.5 text-xs italic text-accent-600">“{item.specialInstructions}”</p>
           )}
+          {item.adjustment && (
+            <p className="mt-0.5 text-xs text-warn-600">
+              {item.status === 'cancelled'
+                ? `Removed (was ${item.adjustment.fromQuantity}×)`
+                : `Reduced from ${item.adjustment.fromQuantity}×`}{' '}
+              by {item.adjustment.byName} · {item.adjustment.reason}
+            </p>
+          )}
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
@@ -40,7 +48,14 @@ export function OrderItemLine({
             {meta.label}
           </Badge>
         )}
-        <span className="w-16 text-right text-sm font-semibold tabular-nums">
+        {/* A cancelled line is struck, not silently priced: it is on the
+            ticket's history but not on the bill. */}
+        <span
+          className={cn(
+            'w-16 text-right text-sm font-semibold tabular-nums',
+            item.status === 'cancelled' && 'text-ink-300 line-through',
+          )}
+        >
           {formatINR(item.unitPrice * item.quantity)}
         </span>
       </div>
@@ -50,21 +65,9 @@ export function OrderItemLine({
 
 export function OrderTotals({ order, compact = false }: { order: Order; compact?: boolean }) {
   return (
-    <div className={cn('space-y-1 text-sm', compact && 'text-xs')}>
-      <div className="flex justify-between text-ink-500">
-        <span>Subtotal</span>
-        <span className="tabular-nums">{formatINR(order.subtotal)}</span>
-      </div>
-      <div className="flex justify-between text-ink-500">
-        <span>
-          {order.taxLabel} ({order.taxRatePercent}%)
-        </span>
-        <span className="tabular-nums">{formatINR(order.taxAmount)}</span>
-      </div>
-      <div className="flex justify-between text-base font-bold">
-        <span>Total</span>
-        <span className="tabular-nums">{formatINR(order.total)}</span>
-      </div>
+    <div className={cn('flex justify-between border-t border-surface-200 pt-2 text-sm font-bold', compact && 'text-xs')}>
+      <span>Round total</span>
+      <span className="tabular-nums">{formatINR(order.total)}</span>
     </div>
   )
 }

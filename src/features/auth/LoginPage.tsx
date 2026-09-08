@@ -42,10 +42,10 @@ export function LoginPage() {
   return (
     <div className="grid min-h-dvh lg:grid-cols-2">
       {/* Brand panel */}
-      <div className="relative hidden flex-col justify-between overflow-hidden bg-ink-900 p-10 text-cream-50 lg:flex">
+      <div className="relative hidden flex-col justify-between overflow-hidden bg-ink-900 p-10 text-surface-50 lg:flex">
         <div className="flex items-center gap-3">
-          <div className="grid size-11 place-items-center rounded-xl bg-cream-50/10">
-            <Coffee className="size-6 text-cream-100" />
+          <div className="grid size-11 place-items-center rounded-xl bg-surface-50/10">
+            <Coffee className="size-6 text-surface-100" />
           </div>
           <p className="text-lg font-bold tracking-tight">{cafeName}</p>
         </div>
@@ -53,12 +53,12 @@ export function LoginPage() {
           <h1 className="font-display max-w-md text-[2.75rem] font-medium leading-[1.15]">
             One system for the floor <em className="text-accent-100">and</em> the kitchen.
           </h1>
-          <p className="mt-4 max-w-sm text-cream-300">
+          <p className="mt-4 max-w-sm text-surface-300">
             Take orders in seconds, route them to the right station, and watch
             them move from placed to paid in real time.
           </p>
         </div>
-        <p className="text-sm text-cream-400">Prototype build · mock data, no backend yet</p>
+        <p className="text-sm text-surface-400">Prototype build · mock data, no backend yet</p>
         <div className="pointer-events-none absolute -right-24 -top-24 size-96 rounded-full bg-accent-500/20 blur-3xl" aria-hidden />
         <div className="pointer-events-none absolute -bottom-32 -left-16 size-96 rounded-full bg-accent-500/10 blur-3xl" aria-hidden />
       </div>
@@ -86,7 +86,7 @@ export function LoginPage() {
                   }}
                   className={cn(
                     'flex flex-col items-center gap-2 rounded-card border-2 bg-white p-5 transition-colors',
-                    active ? 'border-accent-500 shadow-card' : 'border-cream-200 hover:border-cream-300',
+                    active ? 'border-accent-500 shadow-card' : 'border-surface-200 hover:border-surface-300',
                   )}
                 >
                   <Icon className={cn('size-7', active ? 'text-accent-600' : 'text-ink-500')} />
@@ -108,7 +108,7 @@ export function LoginPage() {
                     ? 'border-danger-600 bg-danger-100'
                     : i < pin.length
                       ? 'border-accent-500 bg-accent-500'
-                      : 'border-cream-300 bg-white',
+                      : 'border-surface-300 bg-white',
                 )}
               />
             ))}
@@ -122,7 +122,7 @@ export function LoginPage() {
                 type="button"
                 onClick={() => pressDigit(d)}
                 disabled={!selected}
-                className="h-14 rounded-xl bg-white text-lg font-bold shadow-card transition-colors hover:bg-cream-50 disabled:opacity-40"
+                className="h-14 rounded-xl bg-white text-lg font-bold shadow-card transition-colors hover:bg-surface-50 disabled:opacity-40"
               >
                 {d}
               </button>
@@ -132,7 +132,7 @@ export function LoginPage() {
               type="button"
               onClick={() => pressDigit('0')}
               disabled={!selected}
-              className="h-14 rounded-xl bg-white text-lg font-bold shadow-card transition-colors hover:bg-cream-50 disabled:opacity-40"
+              className="h-14 rounded-xl bg-white text-lg font-bold shadow-card transition-colors hover:bg-surface-50 disabled:opacity-40"
             >
               0
             </button>
@@ -141,7 +141,7 @@ export function LoginPage() {
               onClick={() => setPin((p) => p.slice(0, -1))}
               disabled={!selected || pin.length === 0}
               aria-label="Delete digit"
-              className="grid h-14 place-items-center rounded-xl bg-white shadow-card transition-colors hover:bg-cream-50 disabled:opacity-40"
+              className="grid h-14 place-items-center rounded-xl bg-white shadow-card transition-colors hover:bg-surface-50 disabled:opacity-40"
             >
               <Delete className="size-5" />
             </button>

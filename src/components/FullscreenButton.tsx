@@ -32,7 +32,7 @@ export function FullscreenButton({ dark = false }: { dark?: boolean }) {
       aria-label={isFull ? 'Exit full screen' : 'Full screen'}
       className={cn(
         'grid size-9 place-items-center rounded-lg transition-colors',
-        dark ? 'text-cream-300 hover:bg-white/10' : 'text-ink-500 hover:bg-cream-100 hover:text-ink-900',
+        dark ? 'text-surface-300 hover:bg-white/10' : 'text-ink-500 hover:bg-surface-100 hover:text-ink-900',
       )}
     >
       {isFull ? <Minimize className="size-[18px]" /> : <Maximize className="size-[18px]" />}

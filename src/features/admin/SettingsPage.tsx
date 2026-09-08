@@ -7,7 +7,7 @@ import { byDisplayOrder } from '@/lib/utils'
 import { settingsService } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
 
-/** Café-level configuration: identity, tax, stations, demo data. */
+/** Café-level configuration: identity, loyalty, stations, demo data. */
 export function SettingsPage() {
   const settings = useAppStore((s) => s.db.settings)
   const stations = useAppStore((s) => s.db.stations)
@@ -15,44 +15,30 @@ export function SettingsPage() {
   const pushToast = useToasts((s) => s.push)
 
   const [cafeName, setCafeName] = useState(settings.cafeName)
-  const [taxLabel, setTaxLabel] = useState(settings.taxLabel)
-  const [taxRate, setTaxRate] = useState(String(settings.taxRatePercent))
   const [confirmReset, setConfirmReset] = useState(false)
 
   const save = () => {
-    const rate = Math.max(0, Math.min(100, Number(taxRate) || 0))
-    settingsService.update({
-      cafeName: cafeName.trim() || settings.cafeName,
-      taxLabel: taxLabel.trim() || 'Tax',
-      taxRatePercent: rate,
-    })
+    settingsService.update({ cafeName: cafeName.trim() || settings.cafeName })
     pushToast('Settings saved', 'ok')
   }
 
   return (
     <div className="max-w-2xl">
-      <PageHeader title="Settings" sub="Applies everywhere immediately — new orders pick up the new tax rate" />
+      <PageHeader title="Settings" sub="Changes apply everywhere immediately" />
 
       <Card className="mb-5 p-5">
         <h2 className="mb-4 text-base font-bold">Café</h2>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Café name">
-            <Input value={cafeName} onChange={(e) => setCafeName(e.target.value)} />
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Tax label">
-              <Input value={taxLabel} onChange={(e) => setTaxLabel(e.target.value)} placeholder="GST" />
-            </Field>
-            <Field label="Tax rate (%)">
-              <Input type="number" min={0} max={100} step="0.5" value={taxRate} onChange={(e) => setTaxRate(e.target.value)} />
-            </Field>
-          </div>
-        </div>
+        <Field label="Café name">
+          <Input value={cafeName} onChange={(e) => setCafeName(e.target.value)} />
+        </Field>
+        <p className="mt-2 text-xs text-ink-500">
+          Bills are charged at menu price. No tax is added anywhere in the app.
+        </p>
         <Button className="mt-4" onClick={save}>
           Save settings
         </Button>
 
-        <div className="mt-5 flex items-center justify-between gap-4 rounded-xl bg-cream-100 px-4 py-3">
+        <div className="mt-5 flex items-center justify-between gap-4 rounded-xl bg-surface-100 px-4 py-3">
           <div>
             <p className="text-sm font-semibold">Ask for customer name &amp; mobile</p>
             <p className="text-xs text-ink-500">
@@ -123,7 +109,7 @@ export function SettingsPage() {
         </p>
         <ul className="space-y-2">
           {[...stations].sort(byDisplayOrder).map((s) => (
-            <li key={s.id} className="flex items-center gap-3 rounded-xl bg-cream-100 px-4 py-2.5">
+            <li key={s.id} className="flex items-center gap-3 rounded-xl bg-surface-100 px-4 py-2.5">
               <span className="text-lg" aria-hidden>
                 {s.icon}
               </span>

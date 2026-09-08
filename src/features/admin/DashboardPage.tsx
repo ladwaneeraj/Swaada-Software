@@ -96,14 +96,14 @@ export function DashboardPage() {
           {activeOrders.length === 0 ? (
             <EmptyState icon="☕" title="All quiet" hint="No active orders right now." />
           ) : (
-            <ul className="divide-y divide-cream-100">
+            <ul className="divide-y divide-surface-100">
               {activeOrders.slice(0, 6).map((order) => {
                 const meta = ORDER_STATUS_META[order.status]
                 return (
                   <li key={order.id}>
                     <Link
                       to={`/admin/orders?focus=${order.id}`}
-                      className="flex items-center justify-between gap-3 py-3 hover:bg-cream-50"
+                      className="flex items-center justify-between gap-3 py-3 hover:bg-surface-50"
                     >
                       <div className="min-w-0">
                         <p className="text-sm font-bold">
@@ -139,7 +139,7 @@ export function DashboardPage() {
             <ul className="space-y-3">
               {stats.topItems.map(([name, qty], i) => (
                 <li key={name} className="flex items-center gap-3">
-                  <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-cream-200 text-xs font-bold text-ink-700">
+                  <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-surface-200 text-xs font-bold text-ink-700">
                     {i + 1}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm font-semibold">{name}</span>

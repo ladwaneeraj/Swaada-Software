@@ -3,9 +3,10 @@ import { useMemo, useState } from 'react'
 import { PageHeader } from '@/components/layout/AdminLayout'
 import { Card, EmptyState, Segmented, Stat } from '@/components/ui'
 import { PAYMENT_METHOD_META } from '@/lib/statusMeta'
-import { cn, formatINR } from '@/lib/utils'
+import { cn, formatINR, round2 } from '@/lib/utils'
 import { useAppStore } from '@/store/useAppStore'
-import type { Order } from '@/types'
+import type { Bill, Order } from '@/types'
+import { PAYMENT_METHODS } from '@/types'
 
 type Range = 'today' | '7d' | 'all'
 
@@ -15,9 +16,10 @@ type Range = 'today' | '7d' | 'all'
  */
 export function AnalyticsPage() {
   const orders = useAppStore((s) => s.db.orders)
+  const bills = useAppStore((s) => s.db.bills)
   const [range, setRange] = useState<Range>('today')
 
-  const data = useMemo(() => computeAnalytics(orders, range), [orders, range])
+  const data = useMemo(() => computeAnalytics(orders, bills, range), [orders, bills, range])
 
   return (
     <div>
@@ -38,9 +40,9 @@ export function AnalyticsPage() {
       />
 
       <div className="mb-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Stat label="Collected" value={formatINR(data.revenue)} sub="settled bills" icon={<IndianRupee className="size-5" />} />
+        <Stat label="Collected" value={formatINR(data.revenue)} sub="after discounts" icon={<IndianRupee className="size-5" />} />
         <Stat label="Rounds" value={String(data.orderCount)} sub="excluding cancelled" icon={<ReceiptText className="size-5" />} />
-        <Stat label="Avg round value" value={data.settledCount ? formatINR(data.revenue / data.settledCount) : '—'} icon={<TrendingUp className="size-5" />} />
+        <Stat label="Avg bill" value={data.billCount ? formatINR(data.revenue / data.billCount) : '—'} sub={`${data.billCount} settled`} icon={<TrendingUp className="size-5" />} />
         <Stat label="Items sold" value={String(data.itemsSold)} icon={<Soup className="size-5" />} />
       </div>
 
@@ -50,7 +52,7 @@ export function AnalyticsPage() {
         <div className="grid gap-5 lg:grid-cols-2">
           <Card className="p-5">
             <h2 className="mb-1 text-base font-bold">Revenue by day</h2>
-            <p className="mb-4 text-xs text-ink-500">Settled rounds, last 7 days</p>
+            <p className="mb-4 text-xs text-ink-500">Bills settled, last 7 days</p>
             <ColumnChart
               points={data.revenueByDay.map((d) => ({ label: d.label, value: d.revenue, detail: `${d.label} — ${formatINR(d.revenue)}` }))}
               format={(v) => formatINR(v)}
@@ -75,7 +77,7 @@ export function AnalyticsPage() {
 
           <Card className="p-5">
             <h2 className="mb-1 text-base font-bold">Revenue by category</h2>
-            <p className="mb-4 text-xs text-ink-500">Where the money comes from</p>
+            <p className="mb-4 text-xs text-ink-500">At menu price, before bill discounts</p>
             <BarList
               rows={data.byCategory.map(([name, amount]) => ({
                 label: name,
@@ -87,7 +89,7 @@ export function AnalyticsPage() {
 
           <Card className="p-5">
             <h2 className="mb-1 text-base font-bold">Payments</h2>
-            <p className="mb-4 text-xs text-ink-500">Cash vs UPI, settled bills in this range</p>
+            <p className="mb-4 text-xs text-ink-500">Cash vs UPI across settled bills, split bills included</p>
             {data.payments.length === 0 ? (
               <p className="py-8 text-center text-sm text-ink-500">No settled bills yet.</p>
             ) : (
@@ -108,7 +110,7 @@ export function AnalyticsPage() {
 
 /* ------------------------------ Computation ------------------------------ */
 
-function computeAnalytics(orders: Order[], range: Range) {
+function computeAnalytics(orders: Order[], bills: Bill[], range: Range) {
   const now = new Date()
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const cutoff =
@@ -119,17 +121,22 @@ function computeAnalytics(orders: Order[], range: Range) {
         : new Date(0)
 
   const inRange = orders.filter((o) => new Date(o.placedAt) >= cutoff && o.status !== 'cancelled')
-  const settled = inRange.filter((o) => o.status === 'settled')
+  const billsInRange = bills.filter((b) => new Date(b.settledAt) >= cutoff)
 
-  const revenue = settled.reduce((s, o) => s + o.total, 0)
+  // Money actually taken, which is bill totals (after discounts and points),
+  // not the sum of round values. The payment mix below must add up to it.
+  const revenue = round2(billsInRange.reduce((s, b) => s + b.total, 0))
 
   const paymentSplit = new Map<string, number>()
-  settled.forEach((o) => {
-    if (o.paymentMethod) {
-      const label = PAYMENT_METHOD_META[o.paymentMethod].label
-      paymentSplit.set(label, (paymentSplit.get(label) ?? 0) + o.total)
-    }
-  })
+  billsInRange.forEach((b) =>
+    PAYMENT_METHODS.forEach((m) => {
+      if (b.payments[m] > 0) {
+        const label = PAYMENT_METHOD_META[m].label
+        paymentSplit.set(label, (paymentSplit.get(label) ?? 0) + b.payments[m])
+      }
+    }),
+  )
+
   const itemsSold = inRange.reduce(
     (s, o) => s + o.items.filter((i) => i.status !== 'cancelled').reduce((n, i) => n + i.quantity, 0),
     0,
@@ -139,13 +146,12 @@ function computeAnalytics(orders: Order[], range: Range) {
   const revenueByDay = Array.from({ length: 7 }, (_, i) => {
     const day = new Date(startOfToday.getTime() - (6 - i) * 86400000)
     const next = new Date(day.getTime() + 86400000)
-    const dayRevenue = orders
-      .filter((o) => o.status === 'settled')
-      .filter((o) => {
-        const t = new Date(o.placedAt)
+    const dayRevenue = bills
+      .filter((b) => {
+        const t = new Date(b.settledAt)
         return t >= day && t < next
       })
-      .reduce((s, o) => s + o.total, 0)
+      .reduce((s, b) => s + b.total, 0)
     return { label: day.toLocaleDateString([], { weekday: 'short' }), revenue: dayRevenue }
   })
 
@@ -174,7 +180,7 @@ function computeAnalytics(orders: Order[], range: Range) {
   return {
     revenue,
     orderCount: inRange.length,
-    settledCount: settled.length,
+    billCount: billsInRange.length,
     itemsSold,
     revenueByDay,
     ordersByHour,
@@ -201,7 +207,7 @@ function ColumnChart({
   const maxIndex = points.findIndex((p) => p.value === max && max > 0)
   return (
     <div>
-      <div className="flex h-40 items-end gap-1.5 border-b border-cream-200">
+      <div className="flex h-40 items-end gap-1.5 border-b border-surface-200">
         {points.map((p, i) => (
           <div key={p.label + i} className="group relative flex h-full flex-1 flex-col items-center justify-end">
             {/* selective direct label: only the peak value is printed */}
@@ -246,7 +252,7 @@ function BarList({ rows }: { rows: Array<{ label: string; value: number; valueLa
             <span className="min-w-0 truncate text-sm font-semibold">{r.label}</span>
             <span className="shrink-0 text-sm font-bold tabular-nums text-ink-700">{r.valueLabel}</span>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-cream-200">
+          <div className="h-2 overflow-hidden rounded-full bg-surface-200">
             <div
               className="h-full rounded-full bg-accent-500 transition-colors group-hover:bg-accent-600"
               style={{ width: `${(r.value / max) * 100}%` }}
