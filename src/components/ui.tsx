@@ -345,16 +345,28 @@ export function EmptyState({
 
 /* ------------------------------- Stat tile ------------------------------- */
 
+const statTones: Record<Tone, string> = {
+  neutral: 'text-ink-900',
+  info: 'text-info-600',
+  warn: 'text-warn-600',
+  ok: 'text-ok-600',
+  accent: 'text-accent-600',
+  danger: 'text-danger-600',
+}
+
 export function Stat({
   label,
   value,
   sub,
   icon,
+  tone = 'neutral',
 }: {
   label: string
   value: string
   sub?: string
   icon?: ReactNode
+  /** Colours the number when it carries a warning ("owed to the cafe"). */
+  tone?: Tone
 }) {
   return (
     <Card className="flex items-center gap-4 p-5">
@@ -365,7 +377,9 @@ export function Stat({
       )}
       <div className="min-w-0">
         <p className="truncate text-[13px] font-semibold uppercase tracking-wide text-ink-500">{label}</p>
-        <p className="font-display text-2xl font-bold leading-tight tabular-nums">{value}</p>
+        <p className={cn('font-display text-2xl font-bold leading-tight tabular-nums', statTones[tone])}>
+          {value}
+        </p>
         {sub && <p className="text-xs text-ink-500">{sub}</p>}
       </div>
     </Card>

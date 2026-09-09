@@ -1,9 +1,10 @@
-import { byDisplayOrder, clamp, nowISO, round2, uid } from '@/lib/utils'
+import { byDisplayOrder, clamp, isToday, nowISO, round2, uid } from '@/lib/utils'
 import type {
   Bill,
   BillPayments,
   CafeSettings,
   Category,
+  Customer,
   FloorState,
   ID,
   ItemAvailability,
@@ -18,6 +19,8 @@ import type {
   Session,
   PaymentMethod,
   Station,
+  WalletEntry,
+  WalletEntryKind,
 } from '@/types'
 import { PAYMENT_METHODS } from '@/types'
 import { db } from './db'
@@ -227,8 +230,8 @@ export const orderService = {
     tableId: ID | null
     lines: PlaceOrderLine[]
     session: Session
-    customerName?: string
-    customerPhone?: string
+    /** The guest this sitting belongs to, when one was identified. */
+    customerId?: ID
   }): Order {
     let created: Order | null = null
     db.mutate((draft) => {
@@ -236,6 +239,7 @@ export const orderService = {
       const now = nowISO()
       const stationById = new Map(draft.stations.map((s) => [s.id, s]))
       const categoryById = new Map(draft.categories.map((c) => [c.id, c]))
+      const customer = customerService.byId(draft.customers, input.customerId)
 
       const items: OrderItem[] = input.lines.map((line) => {
         const modifiers: OrderItemModifier[] = line.modifiers.map((m) => ({
@@ -274,8 +278,11 @@ export const orderService = {
         total: orderTotal(items),
         createdByUserId: input.session.userId,
         createdByName: input.session.name,
-        customerName: input.customerName?.trim() || undefined,
-        customerPhone: input.customerPhone?.trim() || undefined,
+        // Denormalised alongside the id so an old round still reads correctly
+        // if the guest is renamed later, exactly like the item snapshots.
+        customerId: customer?.id,
+        customerName: customer?.name,
+        customerPhone: customer?.phone,
         placedAt: now,
       }
       draft.counters.nextOrderNumber += 1
@@ -285,6 +292,25 @@ export const orderService = {
     })
     if (!created) throw new Error('placeOrder failed')
     return created
+  },
+
+  /**
+   * Attach, change or clear the guest on a table's open rounds. Guests often
+   * only give their number when the bill arrives — usually because they want
+   * to pay later — so this has to work after the food is already served.
+   */
+  setSittingCustomer(tableId: ID, customerId: ID | null): void {
+    db.mutate((draft) => {
+      const open = draft.orders.filter((o) => o.tableId === tableId && isActiveOrder(o))
+      if (open.length === 0) return
+      const customer = customerId ? draft.customers.find((c) => c.id === customerId) : undefined
+      open.forEach((o) => {
+        o.customerId = customer?.id
+        o.customerName = customer?.name
+        o.customerPhone = customer?.phone
+      })
+      return open.map((o) => ({ type: 'ORDER_UPDATED', orderId: o.id }) as RealtimeEvent)
+    })
   },
 
   cancelOrder(orderId: ID, reason: string): void {
@@ -459,6 +485,182 @@ export function paidMethods(payments: BillPayments): Array<[PaymentMethod, numbe
   )
 }
 
+/* ------------------------------ Customers ------------------------------- */
+/* A guest is identified by their mobile number and nothing else. The record  */
+/* holds only what a person typed; visits, spend and points stay derived from */
+/* bills, and the money side lives in the wallet ledger below.                */
+
+/** Digits only, last ten: "+91 98765 43210" and "9876543210" are one guest. */
+export function normalisePhone(input: string): string {
+  return input.replace(/\D/g, '').slice(-10)
+}
+
+export function isCompletePhone(input: string): boolean {
+  return normalisePhone(input).length === 10
+}
+
+export const customerService = {
+  find(customers: Customer[], phone: string): Customer | undefined {
+    const key = normalisePhone(phone)
+    return key.length === 10 ? customers.find((c) => c.phone === key) : undefined
+  },
+
+  byId(customers: Customer[], id: ID | undefined): Customer | undefined {
+    return id ? customers.find((c) => c.id === id) : undefined
+  },
+
+  /**
+   * Look a guest up by mobile, creating the record the first time that number
+   * is seen. A name given later fills in or corrects the one on file, so the
+   * counter never has to visit a separate "add customer" screen.
+   */
+  upsert(input: { phone: string; name?: string }): Customer | null {
+    const phone = normalisePhone(input.phone)
+    if (phone.length !== 10) return null
+    let saved: Customer | null = null
+    db.mutate((draft) => {
+      const now = nowISO()
+      const name = input.name?.trim()
+      const existing = draft.customers.find((c) => c.phone === phone)
+      if (existing) {
+        if (name && name !== existing.name) {
+          existing.name = name
+          existing.updatedAt = now
+        }
+        saved = existing
+      } else {
+        const created: Customer = {
+          id: uid('cus'),
+          phone,
+          name: name || 'Guest',
+          createdAt: now,
+          updatedAt: now,
+        }
+        draft.customers.push(created)
+        saved = created
+      }
+      return { type: 'CUSTOMERS_UPDATED' }
+    })
+    return saved
+  },
+
+  update(id: ID, patch: { name?: string; note?: string }): void {
+    db.mutate((draft) => {
+      const customer = draft.customers.find((c) => c.id === id)
+      if (!customer) return
+      if (patch.name !== undefined) customer.name = patch.name.trim() || customer.name
+      if (patch.note !== undefined) customer.note = patch.note.trim() || undefined
+      customer.updatedAt = nowISO()
+      return { type: 'CUSTOMERS_UPDATED' }
+    })
+  },
+}
+
+/* -------------------------------- Wallet -------------------------------- */
+/* One signed ledger per guest. Positive means the cafe is holding their     */
+/* money, negative means they owe it. Never write a balance anywhere: it is  */
+/* the sum of the entries, so history and balance can never disagree.        */
+
+export function walletBalance(entries: WalletEntry[], customerId: ID | undefined): number {
+  if (!customerId) return 0
+  return round2(entries.filter((e) => e.customerId === customerId).reduce((sum, e) => sum + e.amount, 0))
+}
+
+/** A guest's entries, newest first. */
+export function walletLedger(entries: WalletEntry[], customerId: ID): WalletEntry[] {
+  return entries.filter((e) => e.customerId === customerId).sort((a, b) => b.at.localeCompare(a.at))
+}
+
+/** What the guest owes right now, as a positive number (0 when in credit). */
+export function amountOwed(balance: number): number {
+  return balance < 0 ? round2(-balance) : 0
+}
+
+/** Advance the cafe is holding, as a positive number (0 when they owe). */
+export function advanceHeld(balance: number): number {
+  return balance > 0 ? round2(balance) : 0
+}
+
+function walletEntry(input: {
+  customerId: ID
+  amount: number
+  kind: WalletEntryKind
+  session: Session
+  billId?: ID
+  billNumber?: number
+  method?: PaymentMethod
+  note?: string
+}): WalletEntry {
+  return {
+    id: uid('wal'),
+    customerId: input.customerId,
+    amount: round2(input.amount),
+    kind: input.kind,
+    billId: input.billId,
+    billNumber: input.billNumber,
+    method: input.method,
+    note: input.note?.trim() || undefined,
+    at: nowISO(),
+    byUserId: input.session.userId,
+    byName: input.session.name,
+  }
+}
+
+export const walletService = {
+  /**
+   * Money handed over at the counter with no bill attached. It clears what
+   * the guest owes first and whatever is left stays as advance — one entry
+   * either way, since the balance is a single running number.
+   */
+  takeMoney(input: {
+    customerId: ID
+    amount: number
+    method: PaymentMethod
+    session: Session
+    note?: string
+  }): void {
+    const amount = round2(Math.max(0, input.amount))
+    if (amount <= 0) return
+    db.mutate((draft) => {
+      const owed = amountOwed(walletBalance(draft.walletEntries, input.customerId))
+      draft.walletEntries.push(
+        walletEntry({ ...input, amount, kind: owed > 0 ? 'repayment' : 'topup' }),
+      )
+      return { type: 'CUSTOMERS_UPDATED' }
+    })
+  },
+
+  /** Hand an advance back. Never more than the cafe is actually holding. */
+  returnMoney(input: {
+    customerId: ID
+    amount: number
+    method: PaymentMethod
+    session: Session
+    note?: string
+  }): void {
+    db.mutate((draft) => {
+      const held = advanceHeld(walletBalance(draft.walletEntries, input.customerId))
+      const amount = round2(clamp(input.amount, 0, held))
+      if (amount <= 0) return
+      draft.walletEntries.push(walletEntry({ ...input, amount: -amount, kind: 'refund' }))
+      return { type: 'CUSTOMERS_UPDATED' }
+    })
+  },
+
+  /**
+   * Manager correction — writing off a due, fixing a mistyped amount. Signed,
+   * and the note is required so the ledger stays readable a month later.
+   */
+  adjust(input: { customerId: ID; amount: number; note: string; session: Session }): void {
+    const amount = round2(input.amount)
+    if (amount === 0 || !input.note.trim()) return
+    db.mutate((draft) => {
+      draft.walletEntries.push(walletEntry({ ...input, amount, kind: 'adjustment' }))
+      return { type: 'CUSTOMERS_UPDATED' }
+    })
+  },
+}
+
 /* Customer profiles are DERIVED from bills — no separate table to keep in
    sync, and a real database can compute the same with one GROUP BY. */
 
@@ -501,22 +703,124 @@ export function customerProfiles(bills: Bill[]): CustomerProfile[] {
 }
 
 export function customerByPhone(bills: Bill[], phone: string): CustomerProfile | undefined {
-  return customerProfiles(bills).find((c) => c.phone === phone)
+  const key = normalisePhone(phone)
+  return customerProfiles(bills).find((c) => normalisePhone(c.phone) === key)
+}
+
+/**
+ * Everything the counter needs about one guest, in one object: who they are,
+ * what they have spent with us, and where their account stands. Assembled
+ * from the three sources rather than stored, so it cannot drift.
+ */
+export interface CustomerAccount {
+  customer: Customer
+  visits: number
+  totalSpent: number
+  lastVisitAt?: string
+  pointsBalance: number
+  /** + advance the cafe holds, − what the guest owes. */
+  balance: number
+}
+
+export function customerAccounts(input: {
+  customers: Customer[]
+  bills: Bill[]
+  walletEntries: WalletEntry[]
+}): CustomerAccount[] {
+  const stats = new Map(customerProfiles(input.bills).map((p) => [normalisePhone(p.phone), p]))
+  return input.customers
+    .map((customer) => {
+      const s = stats.get(customer.phone)
+      return {
+        customer,
+        visits: s?.visits ?? 0,
+        totalSpent: s?.totalSpent ?? 0,
+        lastVisitAt: s?.lastVisitAt,
+        pointsBalance: s?.pointsBalance ?? 0,
+        balance: walletBalance(input.walletEntries, customer.id),
+      }
+    })
+    .sort((a, b) => (b.lastVisitAt ?? b.customer.createdAt).localeCompare(a.lastVisitAt ?? a.customer.createdAt))
+}
+
+/** The bills a guest has settled, newest first. */
+export function billsForCustomer(bills: Bill[], customer: Customer): Bill[] {
+  return bills
+    .filter((b) => b.customerId === customer.id || normalisePhone(b.customerPhone ?? '') === customer.phone)
+    .sort((a, b) => b.settledAt.localeCompare(a.settledAt))
+}
+
+/**
+ * How one settlement is put together, in the order money moves: advance
+ * first, then whatever the guest hands over now, then anything left on the
+ * account. The settle sheet and the service both call this, so what the
+ * cashier sees on screen is exactly what gets written.
+ */
+export interface SettlementPlan {
+  total: number
+  /** Taken out of the advance the cafe is already holding. */
+  walletApplied: number
+  /** Left on the guest's account to pay next time. */
+  creditAmount: number
+  /** Handed over beyond this bill and kept as advance. */
+  walletTopUp: number
+  /** What cash + UPI must add up to. */
+  tenderTarget: number
+  advanceAvailable: number
+  owedBefore: number
+  balanceAfter: number
+}
+
+export function planSettlement(input: {
+  total: number
+  /** The guest's balance before this bill: + advance held, − owed. */
+  balance: number
+  hasCustomer: boolean
+  allowPayLater: boolean
+  walletApplied?: number
+  creditAmount?: number
+  walletTopUp?: number
+}): SettlementPlan {
+  const advanceAvailable = advanceHeld(input.balance)
+  const walletApplied = input.hasCustomer
+    ? round2(clamp(input.walletApplied ?? 0, 0, Math.min(advanceAvailable, input.total)))
+    : 0
+  const creditAmount =
+    input.hasCustomer && input.allowPayLater
+      ? round2(clamp(input.creditAmount ?? 0, 0, round2(input.total - walletApplied)))
+      : 0
+  const walletTopUp = input.hasCustomer ? round2(Math.max(0, input.walletTopUp ?? 0)) : 0
+
+  return {
+    total: input.total,
+    walletApplied,
+    creditAmount,
+    walletTopUp,
+    tenderTarget: round2(input.total - walletApplied - creditAmount + walletTopUp),
+    advanceAvailable,
+    owedBefore: amountOwed(input.balance),
+    balanceAfter: round2(input.balance - walletApplied - creditAmount + walletTopUp),
+  }
 }
 
 export const billService = {
   /**
    * Settle a table: group all of its delivered rounds into one Bill (with an
    * optional flat discount and loyalty redemption), record how it was paid,
-   * and free the table. Refuses while any round is still with the kitchen.
+   * move the guest's account, and free the table. Refuses while any round is
+   * still with the kitchen.
    */
   settleTable(input: {
     tableId: ID
-    /** Rupees taken in each method; must add up to the bill total. */
+    /** Rupees taken in each method; must add up to the plan's tenderTarget. */
     payments: BillPayments
     session: Session
     discountAmount?: number
     redeemPoints?: number
+    /** Account legs. Ignored when the sitting has no guest attached. */
+    walletApplied?: number
+    creditAmount?: number
+    walletTopUp?: number
   }): Bill | null {
     let created: Bill | null = null
     db.mutate((draft) => {
@@ -526,6 +830,9 @@ export const billService = {
       const table = draft.tables.find((t) => t.id === input.tableId)
       const first = [...open].sort((a, b) => a.placedAt.localeCompare(b.placedAt))[0]
       const phone = first?.customerPhone
+      const customer =
+        customerService.byId(draft.customers, first?.customerId) ??
+        (phone ? customerService.find(draft.customers, phone) : undefined)
       const available = phone ? (customerByPhone(draft.bills, phone)?.pointsBalance ?? 0) : 0
       const preview = computeBillPreview({
         rounds: open,
@@ -535,10 +842,19 @@ export const billService = {
         availablePoints: available,
         hasCustomer: Boolean(phone),
       })
+      const plan = planSettlement({
+        total: preview.total,
+        balance: walletBalance(draft.walletEntries, customer?.id),
+        hasCustomer: Boolean(customer),
+        allowPayLater: draft.settings.accounts.allowPayLater,
+        walletApplied: input.walletApplied,
+        creditAmount: input.creditAmount,
+        walletTopUp: input.walletTopUp,
+      })
       // Guard the invariant at the only door into the ledger: a bill whose
-      // payments do not add up to its total must never be written.
-      const tendered = round2(PAYMENT_METHODS.reduce((s, m) => s + (input.payments[m] || 0), 0))
-      if (Math.abs(tendered - preview.total) > 0.01) return
+      // legs do not add up to its total must never be written.
+      const tendered = round2(PAYMENT_METHODS.reduce((sum, m) => sum + (input.payments[m] || 0), 0))
+      if (Math.abs(tendered - plan.tenderTarget) > 0.01) return
 
       const bill: Bill = {
         id: uid('bill'),
@@ -547,8 +863,9 @@ export const billService = {
         tableName: table?.name ?? open[0]?.tableName ?? '',
         orderIds: open.map((o) => o.id),
         orderNumbers: open.map((o) => o.orderNumber),
-        customerName: first?.customerName,
-        customerPhone: phone,
+        customerId: customer?.id,
+        customerName: customer?.name ?? first?.customerName,
+        customerPhone: customer?.phone ?? phone,
         subtotal: preview.subtotal,
         discountAmount: preview.discountAmount,
         pointsRedeemed: preview.pointsRedeemed,
@@ -556,12 +873,35 @@ export const billService = {
         pointsEarned: preview.pointsToEarn,
         total: preview.total,
         payments: input.payments,
+        walletApplied: plan.walletApplied,
+        creditAmount: plan.creditAmount,
+        walletTopUp: plan.walletTopUp,
         settledAt: now,
         settledByUserId: input.session.userId,
         settledByName: input.session.name,
       }
       draft.counters.nextBillNumber += 1
       draft.bills.push(bill)
+
+      // One ledger line per thing that actually happened, so the guest's
+      // history reads as a story rather than a single net number.
+      if (customer) {
+        const ledger = (amount: number, kind: WalletEntryKind) =>
+          draft.walletEntries.push(
+            walletEntry({
+              customerId: customer.id,
+              amount,
+              kind,
+              session: input.session,
+              billId: bill.id,
+              billNumber: bill.billNumber,
+            }),
+          )
+        if (plan.walletApplied > 0) ledger(-plan.walletApplied, 'spend')
+        if (plan.creditAmount > 0) ledger(-plan.creditAmount, 'credit')
+        if (plan.walletTopUp > 0) ledger(plan.walletTopUp, 'topup')
+      }
+
       open.forEach((o) => {
         o.status = 'settled'
         o.settledAt = now
@@ -572,6 +912,59 @@ export const billService = {
     })
     return created
   },
+}
+
+/* ------------------------------ Day money ------------------------------- */
+
+/**
+ * Two different questions a cafe asks at closing time, kept apart on purpose:
+ * what was SOLD today, and what was COLLECTED today. They differ by exactly
+ * the amount that was eaten on credit, paid out of an old advance, or handed
+ * over for later — so the drawer reconciles even when guests pay on their
+ * own schedule.
+ */
+export interface DayMoney {
+  sales: number
+  collected: number
+  cash: number
+  upi: number
+  fromAdvance: number
+  leftUnpaid: number
+  advanceTaken: number
+}
+
+export function moneyForDay(input: {
+  bills: Bill[]
+  walletEntries: WalletEntry[]
+  /** Defaults to "today" on this device. */
+  onDay?: (iso: string) => boolean
+}): DayMoney {
+  const onDay = input.onDay ?? isToday
+  const bills = input.bills.filter((b) => onDay(b.settledAt))
+  // Money taken or returned at the counter, outside any bill.
+  const counter = input.walletEntries.filter((e) => onDay(e.at) && !e.billId && e.method)
+
+  const cash = round2(
+    bills.reduce((s, b) => s + b.payments.cash, 0) +
+      counter.filter((e) => e.method === 'cash').reduce((s, e) => s + e.amount, 0),
+  )
+  const upi = round2(
+    bills.reduce((s, b) => s + b.payments.upi, 0) +
+      counter.filter((e) => e.method === 'upi').reduce((s, e) => s + e.amount, 0),
+  )
+
+  return {
+    sales: round2(bills.reduce((s, b) => s + b.total, 0)),
+    collected: round2(cash + upi),
+    cash,
+    upi,
+    fromAdvance: round2(bills.reduce((s, b) => s + b.walletApplied, 0)),
+    leftUnpaid: round2(bills.reduce((s, b) => s + b.creditAmount, 0)),
+    advanceTaken: round2(
+      bills.reduce((s, b) => s + b.walletTopUp, 0) +
+        counter.filter((e) => e.amount > 0).reduce((s, e) => s + e.amount, 0),
+    ),
+  }
 }
 
 /** The bill a settled round belongs to, for history and receipts. */

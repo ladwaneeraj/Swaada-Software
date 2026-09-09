@@ -458,11 +458,16 @@ export function seedSnapshot(): DBSnapshot {
     tables,
     orders: [],
     bills: [],
+    customers: [],
+    walletEntries: [],
     users,
     settings: {
       cafeName: 'Swaada Café',
       currency: 'INR' as const,
       askCustomerInfo: true,
+      accounts: {
+        allowPayLater: true,
+      },
       loyalty: {
         enabled: true,
         pointsPer100: 5,

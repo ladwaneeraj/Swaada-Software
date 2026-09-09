@@ -51,21 +51,51 @@ export function SettingsPage() {
           Save settings
         </Button>
 
-        <div className="mt-5 flex items-center justify-between gap-4 rounded-xl bg-surface-100 px-4 py-3">
-          <div>
-            <p className="text-sm font-semibold">Ask for customer name &amp; mobile</p>
-            <p className="text-xs text-ink-500">
-              Shown on a table's first order. Always optional for the customer.
-            </p>
+      </Card>
+
+      <Card className="mb-5 p-5">
+        <h2 className="mb-1 text-base font-bold">Customer accounts</h2>
+        <p className="mb-4 text-sm text-ink-500">
+          A guest is identified by their mobile number. Typing it brings back their name, what they
+          have spent, and whether the café is holding their money or they owe some.
+        </p>
+
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-4 rounded-xl bg-surface-100 px-4 py-3">
+            <div>
+              <p className="text-sm font-semibold">Ask who is at the table</p>
+              <p className="text-xs text-ink-500">
+                Opens the mobile lookup when a table's first round is started. Skipping it is always
+                one tap.
+              </p>
+            </div>
+            <Toggle
+              checked={settings.askCustomerInfo}
+              onChange={(v) => {
+                settingsService.update({ askCustomerInfo: v })
+                pushToast(v ? 'Guest lookup opens with every new sitting' : 'Guest lookup turned off', 'ok')
+              }}
+              label="Ask who is at the table"
+            />
           </div>
-          <Toggle
-            checked={settings.askCustomerInfo}
-            onChange={(v) => {
-              settingsService.update({ askCustomerInfo: v })
-              pushToast(v ? 'Customer details will be asked on first orders' : 'Customer details prompt turned off', 'ok')
-            }}
-            label="Ask for customer details"
-          />
+
+          <div className="flex items-center justify-between gap-4 rounded-xl bg-surface-100 px-4 py-3">
+            <div>
+              <p className="text-sm font-semibold">Allow pay later</p>
+              <p className="text-xs text-ink-500">
+                Lets a bill go out partly or fully unpaid, on the account of a guest with a mobile
+                number. Turn this off and every bill must be settled at the table.
+              </p>
+            </div>
+            <Toggle
+              checked={settings.accounts.allowPayLater}
+              onChange={(allowPayLater) => {
+                settingsService.update({ accounts: { ...settings.accounts, allowPayLater } })
+                pushToast(allowPayLater ? 'Bills can be left on a guest account' : 'Every bill must be settled at the table', 'ok')
+              }}
+              label="Allow pay later"
+            />
+          </div>
         </div>
       </Card>
 

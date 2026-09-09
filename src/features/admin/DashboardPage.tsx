@@ -6,15 +6,48 @@ import { Badge, Button, Card, EmptyState, Stat } from '@/components/ui'
 import { ORDER_STATUS_META } from '@/lib/statusMeta'
 import { elapsedLabel, formatINR, isToday, timeLabel } from '@/lib/utils'
 import { useNow } from '@/lib/useNow'
-import { activeOrdersForTable, isActiveOrder } from '@/services'
+import { activeOrdersForTable, isActiveOrder, moneyForDay } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
+
+function MoneyLine({
+  label,
+  value,
+  strong,
+  tone,
+}: {
+  label: string
+  value: number
+  strong?: boolean
+  tone?: 'danger'
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 border-b border-surface-100 pb-1.5">
+      <span className={strong ? 'font-semibold' : 'text-ink-500'}>{label}</span>
+      <span
+        className={[
+          'tabular-nums',
+          strong ? 'text-base font-bold' : 'font-semibold',
+          tone === 'danger' ? 'text-danger-600' : '',
+        ].join(' ')}
+      >
+        {formatINR(value)}
+      </span>
+    </div>
+  )
+}
 
 /** Morning-glance view: how today is going and what needs attention now. */
 export function DashboardPage() {
   const orders = useAppStore((s) => s.db.orders)
   const tables = useAppStore((s) => s.db.tables)
+  const bills = useAppStore((s) => s.db.bills)
+  const walletEntries = useAppStore((s) => s.db.walletEntries)
   const session = useAppStore((s) => s.session)
   const now = useNow()
+
+  // Two different closing-time questions, kept apart: what was sold today,
+  // and what actually came into the drawer today.
+  const money = useMemo(() => moneyForDay({ bills, walletEntries }), [bills, walletEntries])
 
   const stats = useMemo(() => {
     const today = orders.filter((o) => isToday(o.placedAt))
@@ -68,7 +101,12 @@ export function DashboardPage() {
       />
 
       <div className="mb-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Stat label="Collected today" value={formatINR(stats.revenue)} sub="settled bills" icon={<IndianRupee className="size-5" />} />
+        <Stat
+          label="Sales today"
+          value={formatINR(money.sales)}
+          sub={`${formatINR(money.collected)} collected`}
+          icon={<IndianRupee className="size-5" />}
+        />
         <Stat label="Rounds today" value={String(stats.ordersToday)} icon={<ReceiptText className="size-5" />} />
         <Stat
           label="Open on tables"
@@ -83,6 +121,33 @@ export function DashboardPage() {
           icon={<Clock className="size-5" />}
         />
       </div>
+
+      {/* Day-end money. Sales and collections differ by exactly what was
+          eaten on credit, paid from an old advance, or left for next time. */}
+      {(money.sales > 0 || money.collected > 0) && (
+        <Card className="mb-6 p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-base font-bold">Money today</h2>
+            <Link to="/admin/customers" className="text-sm font-semibold text-accent-600 hover:underline">
+              Customer accounts
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+            <MoneyLine label="Billed" value={money.sales} strong />
+            <MoneyLine label="Cash" value={money.cash} />
+            <MoneyLine label="UPI" value={money.upi} />
+            <MoneyLine label="Collected" value={money.collected} strong />
+            <MoneyLine label="Paid from advance" value={money.fromAdvance} />
+            <MoneyLine label="Left unpaid" value={money.leftUnpaid} tone={money.leftUnpaid > 0 ? 'danger' : undefined} />
+          </div>
+          {money.advanceTaken > 0 && (
+            <p className="mt-3 text-xs text-ink-500">
+              {formatINR(money.advanceTaken)} taken as advance for later visits — collected today, not
+              earned today.
+            </p>
+          )}
+        </Card>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-3">
         {/* Live orders */}

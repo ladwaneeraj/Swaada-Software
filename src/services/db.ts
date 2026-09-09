@@ -25,21 +25,63 @@ type Listener = (snapshot: DBSnapshot) => void
 const DEFAULT_SETTINGS = seedSnapshot().settings
 
 /**
- * Settings gain fields over time (sound alerts, loyalty, ...). Filling the
- * missing ones from the seed keeps an existing snapshot usable instead of
- * forcing a schema bump that would wipe the cafe's orders.
+ * The app gains fields over time (sound alerts, customer accounts, ...).
+ * Filling the missing ones in on read keeps a cafe's existing orders and
+ * bills usable instead of forcing a schema bump that would wipe them.
+ *
+ * Anything added here must be additive and default to "as it was before",
+ * so an older snapshot reads exactly the way it did when it was written.
  */
-function withSettingsDefaults(parsed: DBSnapshot): DBSnapshot {
+function withDefaults(parsed: DBSnapshot): DBSnapshot {
   const stored = parsed.settings ?? DEFAULT_SETTINGS
+  const bills = parsed.bills ?? []
   return {
     ...parsed,
+    // Bills predating customer accounts were paid in full at the counter.
+    bills: bills.map((b) => ({
+      ...b,
+      walletApplied: b.walletApplied ?? 0,
+      creditAmount: b.creditAmount ?? 0,
+      walletTopUp: b.walletTopUp ?? 0,
+    })),
+    customers: parsed.customers ?? customersFromBills(bills),
+    walletEntries: parsed.walletEntries ?? [],
     settings: {
       ...DEFAULT_SETTINGS,
       ...stored,
       loyalty: { ...DEFAULT_SETTINGS.loyalty, ...stored.loyalty },
       sound: { ...DEFAULT_SETTINGS.sound, ...stored.sound },
+      accounts: { ...DEFAULT_SETTINGS.accounts, ...stored.accounts },
     },
   }
+}
+
+/**
+ * Before customer accounts existed, a guest was just a name and number
+ * copied onto each bill. Promote those into real records so a returning
+ * guest is recognised on the first day of the upgrade rather than the
+ * second, with no wallet history (they never had one).
+ */
+function customersFromBills(bills: DBSnapshot['bills']): DBSnapshot['customers'] {
+  const byPhone = new Map<string, DBSnapshot['customers'][number]>()
+  for (const bill of bills) {
+    const phone = (bill.customerPhone ?? '').replace(/\D/g, '').slice(-10)
+    if (phone.length !== 10) continue
+    const existing = byPhone.get(phone)
+    if (existing) {
+      if (bill.customerName) existing.name = bill.customerName
+      existing.updatedAt = bill.settledAt
+      continue
+    }
+    byPhone.set(phone, {
+      id: `cus-${phone}`,
+      phone,
+      name: bill.customerName || 'Guest',
+      createdAt: bill.settledAt,
+      updatedAt: bill.settledAt,
+    })
+  }
+  return [...byPhone.values()]
 }
 
 function loadInitial(): DBSnapshot {
@@ -49,7 +91,7 @@ function loadInitial(): DBSnapshot {
     if (raw) {
       const parsed = JSON.parse(raw) as DBSnapshot
       if (parsed.schemaVersion === fresh.schemaVersion) {
-        const migrated = withSettingsDefaults(parsed)
+        const migrated = withDefaults(parsed)
         // Write the filled-in shape straight back, so other tabs reading
         // localStorage never see a snapshot missing the newer fields.
         persist(migrated)
@@ -83,7 +125,7 @@ function reloadFromStorage(): void {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
-      snapshot = withSettingsDefaults(JSON.parse(raw) as DBSnapshot)
+      snapshot = withDefaults(JSON.parse(raw) as DBSnapshot)
       notify()
     }
   } catch {

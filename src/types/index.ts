@@ -187,7 +187,8 @@ export interface Order {
   total: number
   createdByUserId: ID
   createdByName: string
-  /** Captured optionally on a table's first round (configurable). */
+  /** Captured on the table's first round (configurable, always skippable). */
+  customerId?: ID
   customerName?: string
   customerPhone?: string
   placedAt: string
@@ -223,6 +224,7 @@ export interface Bill {
   tableName: string
   orderIds: ID[]
   orderNumbers: number[]
+  customerId?: ID
   customerName?: string
   customerPhone?: string
   /** Sum of round totals, before any adjustment. */
@@ -235,10 +237,74 @@ export interface Bill {
   /** Points earned by this bill (0 when loyalty is off or no phone). */
   pointsEarned: number
   total: number
+  /** Cash and UPI that actually changed hands at the counter. */
   payments: BillPayments
+  /** Paid out of the guest's advance balance. */
+  walletApplied: number
+  /** Left on the guest's account to pay next time. */
+  creditAmount: number
+  /** Handed over beyond the bill and kept as advance. */
+  walletTopUp: number
   settledAt: string
   settledByUserId: ID
   settledByName: string
+}
+
+/* ------------------------------------------------------------------ */
+/* Customers & wallet                                                  */
+/* ------------------------------------------------------------------ */
+
+/** A guest we know by mobile number, created the first time one is typed. */
+export interface Customer extends Timestamps {
+  id: ID
+  /** Digits only, last 10. The lookup key, unique across customers. */
+  phone: string
+  name: string
+  /** Anything the counter wants to remember ("regular, likes table G2"). */
+  note?: string
+}
+
+/**
+ * How the entry reads in history. It never changes the arithmetic — the
+ * balance is always the signed sum of `amount`.
+ *   topup      guest left money with us (or paid over a bill)
+ *   spend      that money paid for a bill
+ *   credit     a bill went out unpaid
+ *   repayment  guest cleared what they owed
+ *   adjustment manager correction, note required
+ *   refund     advance handed back to the guest
+ */
+export const WALLET_ENTRY_KINDS = [
+  'topup',
+  'spend',
+  'credit',
+  'repayment',
+  'adjustment',
+  'refund',
+] as const
+export type WalletEntryKind = (typeof WALLET_ENTRY_KINDS)[number]
+
+/**
+ * One movement on a guest's account, signed from the cafe's side:
+ *   positive -> the cafe is holding the guest's money (advance)
+ *   negative -> the guest owes the cafe
+ * The balance is the running sum, so a single ledger covers both directions
+ * and nothing has to be zeroed when a guest swings from owing to in credit.
+ */
+export interface WalletEntry {
+  id: ID
+  customerId: ID
+  amount: number
+  kind: WalletEntryKind
+  /** Set when the entry came out of settling a bill. */
+  billId?: ID
+  billNumber?: number
+  /** How the cash moved, for money taken or returned at the counter. */
+  method?: PaymentMethod
+  note?: string
+  at: string
+  byUserId: ID
+  byName: string
 }
 
 /* ------------------------------------------------------------------ */
@@ -269,8 +335,13 @@ export interface Session {
 export interface CafeSettings {
   cafeName: string
   currency: 'INR'
-  /** Ask for customer name & mobile on a table's first round (optional). */
+  /** Open the guest lookup when a table's first round is started. */
   askCustomerInfo: boolean
+  /** Customer accounts: advances held and bills left to pay later. */
+  accounts: {
+    /** Allow a bill to go out partly or fully unpaid. Needs a mobile number. */
+    allowPayLater: boolean
+  }
   loyalty: {
     enabled: boolean
     /** Points earned per ₹100 of the final bill. */
@@ -305,6 +376,8 @@ export interface DBSnapshot {
   tables: CafeTable[]
   orders: Order[]
   bills: Bill[]
+  customers: Customer[]
+  walletEntries: WalletEntry[]
   users: User[]
   settings: CafeSettings
   counters: { nextOrderNumber: number; nextBillNumber: number }
@@ -323,6 +396,7 @@ export type RealtimeEvent =
   | { type: 'ORDER_DELIVERED'; orderId: ID }
   | { type: 'BILL_SETTLED'; billId: ID; tableId: ID | null }
   | { type: 'ORDER_CANCELLED'; orderId: ID }
+  | { type: 'CUSTOMERS_UPDATED' }
   | { type: 'MENU_UPDATED' }
   | { type: 'TABLES_UPDATED' }
   | { type: 'SETTINGS_UPDATED' }

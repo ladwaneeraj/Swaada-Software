@@ -1,8 +1,9 @@
 import { ArrowLeft, Minus, Plus, Search, ShoppingBag, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { CustomerSheet, GuestChip, useAccount } from '@/components/customer/CustomerBits'
 import { useToasts } from '@/components/toast'
-import { Button, Card, Input, Modal, Textarea, VegMark } from '@/components/ui'
+import { Button, Card, Modal, Textarea, VegMark } from '@/components/ui'
 import { assetUrl, byDisplayOrder, cn, formatINR } from '@/lib/utils'
 import {
   itemsForCategory,
@@ -42,6 +43,7 @@ function lineKey(itemId: ID, modifiers: CartModifierSelection[], instructions: s
 
 export function TakeOrderPage() {
   const { tableId } = useParams<{ tableId: string }>()
+  const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
   const pushToast = useToasts((s) => s.push)
 
@@ -58,15 +60,18 @@ export function TakeOrderPage() {
   const existingRounds = table ? activeOrdersForTable(orders, table.id) : []
   const roundNumber = existingRounds.length + 1
   const billSoFar = existingRounds.reduce((s, o) => s + o.total, 0)
-  const askCustomer = settings.askCustomerInfo && roundNumber === 1
+
+  // Round 1 carries the guest chosen on the tables screen (?customer=...);
+  // later rounds inherit whoever is already attached to the sitting.
+  const customerId = existingRounds[0]?.customerId ?? searchParams.get('customer') ?? undefined
+  const account = useAccount(customerId)
 
   const [query, setQuery] = useState('')
   const [activeCategoryId, setActiveCategoryId] = useState<ID | 'all'>('all')
   const [lines, setLines] = useState<CartLine[]>([])
   const [sheet, setSheet] = useState<{ item: MenuItem; editingKey?: string } | null>(null)
   const [cartOpen, setCartOpen] = useState(false)
-  const [customerName, setCustomerName] = useState('')
-  const [customerPhone, setCustomerPhone] = useState('')
+  const [changingGuest, setChangingGuest] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
 
   const activeCategories = useMemo(() => sortedActiveCategories(categories), [categories])
@@ -175,39 +180,27 @@ export function TakeOrderPage() {
         specialInstructions: l.specialInstructions,
       })),
       session,
-      customerName: askCustomer ? customerName : undefined,
-      customerPhone: askCustomer ? customerPhone : undefined,
+      customerId,
     })
     pushToast(`Round ${roundNumber} · order #${order.orderNumber} sent to kitchen`, 'ok')
     navigate('/admin/tables')
   }
 
-  // Optional customer capture on the table's first round (configurable in
-  // Settings). Shared by the desktop cart panel and the mobile cart sheet.
-  const customerSlot = askCustomer ? (
-    <div className="space-y-2 border-t border-surface-200 py-3">
-      <p className="text-xs font-bold uppercase tracking-wide text-ink-500">
-        Customer <span className="font-normal normal-case">(optional)</span>
-      </p>
-      <div className="grid grid-cols-2 gap-2">
-        <Input
-          value={customerName}
-          onChange={(e) => setCustomerName(e.target.value)}
-          placeholder="Name"
-          aria-label="Customer name"
-          className="h-10 text-sm"
-        />
-        <Input
-          value={customerPhone}
-          onChange={(e) => setCustomerPhone(e.target.value)}
-          placeholder="Mobile"
-          type="tel"
-          inputMode="tel"
-          maxLength={15}
-          aria-label="Customer mobile"
-          className="h-10 text-sm"
-        />
-      </div>
+  // Who the sitting belongs to, shown where the bill is built so the
+  // cashier can see the guest's balance before a single item is added.
+  const customerSlot = account ? (
+    <div className="border-t border-surface-200 py-2.5">
+      <GuestChip account={account} onChange={() => setChangingGuest(true)} />
+    </div>
+  ) : settings.askCustomerInfo && roundNumber === 1 ? (
+    <div className="border-t border-surface-200 py-2.5">
+      <button
+        type="button"
+        onClick={() => setChangingGuest(true)}
+        className="w-full rounded-xl border border-dashed border-surface-300 py-2 text-[12px] font-semibold text-ink-500 transition-colors hover:border-accent-500 hover:text-accent-600"
+      >
+        + Add guest
+      </button>
     </div>
   ) : undefined
 
@@ -420,6 +413,22 @@ export function TakeOrderPage() {
       </Modal>
 
       {/* Customization sheet */}
+      <CustomerSheet
+        open={changingGuest}
+        onClose={() => setChangingGuest(false)}
+        title={table ? `Table ${table.name} · guest` : 'Guest'}
+        actionLabel="Use this guest"
+        skipLabel={account ? 'Remove guest' : 'No guest'}
+        onPick={(picked) => {
+          setChangingGuest(false)
+          if (!table) return
+          // Rounds already placed carry the guest; a sitting that has not
+          // started yet only needs the URL to change.
+          if (existingRounds.length > 0) orderService.setSittingCustomer(table.id, picked?.id ?? null)
+          else setSearchParams(picked ? { customer: picked.id } : {}, { replace: true })
+        }}
+      />
+
       {sheet && (
         <CustomizeSheet
           item={sheet.item}

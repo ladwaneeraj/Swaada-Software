@@ -7,6 +7,7 @@ import type {
   OrderItemStatus,
   OrderStatus,
   PaymentMethod,
+  WalletEntryKind,
 } from '@/types'
 
 /**
@@ -34,6 +35,16 @@ export const ORDER_STATUS_META: Record<OrderStatus, StatusMeta> = {
   delivered: { label: 'Delivered', tone: 'ok' },
   settled: { label: 'Paid', tone: 'neutral' },
   cancelled: { label: 'Cancelled', tone: 'danger' },
+}
+
+/** How one line of a guest's account reads. Arithmetic lives in the ledger. */
+export const WALLET_ENTRY_META: Record<WalletEntryKind, { label: string; tone: Tone }> = {
+  topup: { label: 'Money added', tone: 'ok' },
+  spend: { label: 'Paid from advance', tone: 'neutral' },
+  credit: { label: 'Left unpaid', tone: 'danger' },
+  repayment: { label: 'Dues cleared', tone: 'ok' },
+  adjustment: { label: 'Adjusted', tone: 'warn' },
+  refund: { label: 'Money returned', tone: 'neutral' },
 }
 
 export const PAYMENT_METHOD_META: Record<PaymentMethod, { label: string; icon: string }> = {

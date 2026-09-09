@@ -1,7 +1,8 @@
-import { Minus, Pencil, PencilLine, Plus, ReceiptIndianRupee, Search, Sparkles, User, Users } from 'lucide-react'
+import { Minus, Pencil, PencilLine, Plus, ReceiptIndianRupee, Search, Sparkles, UserPlus, Users } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/layout/AdminLayout'
+import { AccountSummary, CustomerSheet, useAccount } from '@/components/customer/CustomerBits'
 import { useToasts } from '@/components/toast'
 import { Badge, Button, Field, Input, Modal, Textarea, Toggle, VegMark } from '@/components/ui'
 import { FLOOR_STATE_META, ORDER_STATUS_META, PAYMENT_METHOD_META, paymentSummary } from '@/lib/statusMeta'
@@ -9,16 +10,19 @@ import { byDisplayOrder, cn, elapsedLabel, formatINR, parseAmount, round2 } from
 import { useNow } from '@/lib/useNow'
 import {
   activeOrdersForTable,
+  advanceHeld,
   billService,
   computeBillPreview,
   customerByPhone,
   floorState,
   orderService,
+  planSettlement,
   splitPayment,
   tableService,
+  walletBalance,
 } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
-import type { CafeTable, Order, PaymentMethod } from '@/types'
+import type { CafeTable, Customer, Order, PaymentMethod } from '@/types'
 import { FLOOR_STATES, PAYMENT_METHODS } from '@/types'
 
 /**
@@ -30,12 +34,15 @@ import { FLOOR_STATES, PAYMENT_METHODS } from '@/types'
 export function TablesPage() {
   const tables = useAppStore((s) => s.db.tables)
   const orders = useAppStore((s) => s.db.orders)
+  const askCustomer = useAppStore((s) => s.db.settings.askCustomerInfo)
   const navigate = useNavigate()
 
   const [editing, setEditing] = useState<CafeTable | 'new' | null>(null)
   const [billTableId, setBillTableId] = useState<string | null>(null)
   const [newOrderOpen, setNewOrderOpen] = useState(false)
   const [billQuery, setBillQuery] = useState('')
+  /** The table waiting on the guest lookup before its first round starts. */
+  const [askingFor, setAskingFor] = useState<CafeTable | null>(null)
 
   const zones = useMemo(() => {
     const active = tables.filter((t) => t.isActive).sort(byDisplayOrder)
@@ -49,9 +56,19 @@ export function TablesPage() {
   const activeTables = tables.filter((t) => t.isActive)
   const freeTables = activeTables.filter((t) => activeOrdersForTable(orders, t.id).length === 0)
 
+  /**
+   * Starting a sitting asks who is at the table first; adding a round to a
+   * table that is already running does not, because the guest is already
+   * attached to it.
+   */
+  const startSitting = (table: CafeTable) => {
+    if (askCustomer) setAskingFor(table)
+    else navigate(`/admin/take-order/${table.id}`)
+  }
+
   const openTable = (table: CafeTable) => {
     if (activeOrdersForTable(orders, table.id).length > 0) setBillTableId(table.id)
-    else navigate(`/admin/take-order/${table.id}`)
+    else startSitting(table)
   }
 
   return (
@@ -109,6 +126,7 @@ export function TablesPage() {
                 rounds={activeOrdersForTable(orders, table.id)}
                 onOpen={() => openTable(table)}
                 onAddRound={() => navigate(`/admin/take-order/${table.id}`)}
+
                 onEdit={() => setEditing(table)}
               />
             ))}
@@ -132,7 +150,7 @@ export function TablesPage() {
                 type="button"
                 onClick={() => {
                   setNewOrderOpen(false)
-                  navigate(`/admin/take-order/${t.id}`)
+                  startSitting(t)
                 }}
                 className="flex flex-col items-center rounded-xl bg-white py-3 shadow-card ring-1 ring-surface-200 transition-all hover:-translate-y-0.5 hover:shadow-lift hover:ring-accent-500"
               >
@@ -145,6 +163,18 @@ export function TablesPage() {
           </div>
         )}
       </Modal>
+
+      <CustomerSheet
+        open={askingFor !== null}
+        onClose={() => setAskingFor(null)}
+        title={askingFor ? `Table ${askingFor.name} · who is at the table?` : 'Who is at the table?'}
+        onPick={(customer) => {
+          const table = askingFor
+          setAskingFor(null)
+          if (!table) return
+          navigate(`/admin/take-order/${table.id}${customer ? `?customer=${customer.id}` : ''}`)
+        }}
+      />
 
       <TableEditor editing={editing} onClose={() => setEditing(null)} />
       <TableBillSheet tableId={billTableId} onClose={() => setBillTableId(null)} />
@@ -261,6 +291,9 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
   const navigate = useNavigate()
   const pushToast = useToasts((s) => s.push)
 
+  const walletEntries = useAppStore((s) => s.db.walletEntries)
+  const customers = useAppStore((s) => s.db.customers)
+
   const [discountText, setDiscountText] = useState('')
   /** Which box the cashier typed in; the other method covers the remainder. */
   const [entry, setEntry] = useState<{ method: PaymentMethod; text: string } | null>(null)
@@ -268,6 +301,11 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
   const [voiding, setVoiding] = useState<Order | null>(null)
   const [voidReason, setVoidReason] = useState('')
   const [editingRound, setEditingRound] = useState<Order | null>(null)
+  /** null means "use the whole advance", the pre-filled default. */
+  const [walletText, setWalletText] = useState<string | null>(null)
+  const [laterText, setLaterText] = useState('')
+  const [extraText, setExtraText] = useState('')
+  const [askingGuest, setAskingGuest] = useState(false)
 
   // Fresh sheet per table opening.
   useEffect(() => {
@@ -277,11 +315,20 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
     setVoiding(null)
     setVoidReason('')
     setEditingRound(null)
+    setWalletText(null)
+    setLaterText('')
+    setExtraText('')
   }, [tableId])
 
   const table = tables.find((t) => t.id === tableId)
   const rounds = table ? activeOrdersForTable(orders, table.id) : []
   const first = rounds[0]
+
+  const customer: Customer | undefined =
+    customers.find((c) => c.id === first?.customerId) ??
+    customers.find((c) => c.phone === (first?.customerPhone ?? ''))
+  const account = useAccount(customer?.id)
+  const balance = walletBalance(walletEntries, customer?.id)
 
   const profile = first?.customerPhone ? customerByPhone(bills, first.customerPhone) : undefined
   const availablePoints = profile?.pointsBalance ?? 0
@@ -295,11 +342,27 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
     hasCustomer: Boolean(first?.customerPhone),
   })
 
+  // Advance is offered, never taken silently: it comes pre-filled and one tap
+  // clears it, so the cashier always sees it move.
+  const advance = advanceHeld(balance)
+  const requestedWallet =
+    walletText === null ? Math.min(advance, preview.total) : parseAmount(walletText)
+
+  const plan = planSettlement({
+    total: preview.total,
+    balance,
+    hasCustomer: Boolean(customer),
+    allowPayLater: settings.accounts.allowPayLater,
+    walletApplied: requestedWallet,
+    creditAmount: parseAmount(laterText),
+    walletTopUp: parseAmount(extraText),
+  })
+
   // The split is derived, never free-typed twice, so the two legs always add
-  // up to the total — an unpayable bill is unrepresentable.
+  // up to what is being handed over — an unpayable bill is unrepresentable.
   const entryMethod = entry?.method ?? 'cash'
-  const entryAmount = entry ? parseAmount(entry.text) : preview.total
-  const payments = splitPayment(preview.total, entryMethod, entryAmount)
+  const entryAmount = entry ? parseAmount(entry.text) : plan.tenderTarget
+  const payments = splitPayment(plan.tenderTarget, entryMethod, entryAmount)
   const isSplit = payments.cash > 0 && payments.upi > 0
 
   /**
@@ -309,7 +372,7 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
    * the two boxes on screen always add up to what is charged.
    */
   const boxValue = (method: PaymentMethod): string =>
-    entry?.method === method && parseAmount(entry.text) <= preview.total
+    entry?.method === method && parseAmount(entry.text) <= plan.tenderTarget
       ? entry.text
       : plainAmount(payments[method])
 
@@ -324,10 +387,19 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
       session,
       discountAmount: parseAmount(discountText),
       redeemPoints: redeem ? availablePoints : 0,
+      walletApplied: plan.walletApplied,
+      creditAmount: plan.creditAmount,
+      walletTopUp: plan.walletTopUp,
     })
     if (bill) {
+      const extras = [
+        bill.walletApplied > 0 && `${formatINR(bill.walletApplied)} from advance`,
+        bill.creditAmount > 0 && `${formatINR(bill.creditAmount)} on account`,
+        bill.walletTopUp > 0 && `${formatINR(bill.walletTopUp)} kept as advance`,
+        bill.pointsEarned > 0 && `+${bill.pointsEarned} pts`,
+      ].filter(Boolean)
       pushToast(
-        `Bill #${bill.billNumber} · ${formatINR(bill.total)} (${paymentSummary(bill.payments)})${bill.pointsEarned > 0 ? ` · +${bill.pointsEarned} pts` : ''} · ${table.name} is free`,
+        `Bill #${bill.billNumber} · ${formatINR(bill.total)} (${paymentSummary(bill.payments)})${extras.length ? ` · ${extras.join(' · ')}` : ''} · ${table.name} is free`,
         'ok',
       )
       onClose()
@@ -385,12 +457,94 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
                 <span className="tabular-nums">−{formatINR(preview.pointsValueRedeemed)}</span>
               </div>
             )}
-            <div className="flex justify-between border-t border-surface-200 pt-1.5 text-lg font-bold">
-              <span>To pay</span>
+            <div className="flex justify-between border-t border-surface-200 pt-1.5 text-base font-bold">
+              <span>Bill</span>
               <span className="tabular-nums">{formatINR(preview.total)}</span>
             </div>
             {preview.pointsToEarn > 0 && (
               <p className="text-right text-xs font-semibold text-accent-600">earns +{preview.pointsToEarn} pts</p>
+            )}
+
+            {/* The guest's account, as bill lines: what comes off an advance,
+                what goes on the tab, what they leave behind for next time. */}
+            {customer && (
+              <>
+                {advance > 0 && (
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="bill-advance" className="text-ink-500">
+                      From advance <span className="text-ink-300">({formatINR(advance)} held)</span>
+                    </label>
+                    <AmountInput
+                      id="bill-advance"
+                      value={walletText ?? plainAmount(plan.walletApplied)}
+                      ariaLabel="Amount taken from the guest's advance"
+                      onChange={setWalletText}
+                      tone={plan.walletApplied > 0 ? 'ok' : 'plain'}
+                    />
+                  </div>
+                )}
+                {settings.accounts.allowPayLater && (
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="bill-later" className="text-ink-500">
+                      Pay later
+                    </label>
+                    <span className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setLaterText(plainAmount(round2(preview.total - plan.walletApplied)))
+                        }
+                        className="h-7 rounded-full bg-white px-2.5 text-[11px] font-bold text-ink-700 shadow-card ring-1 ring-surface-200 hover:text-ink-900"
+                      >
+                        Whole bill
+                      </button>
+                      <AmountInput
+                        id="bill-later"
+                        value={laterText}
+                        placeholder="0"
+                        ariaLabel="Amount left on the guest's account"
+                        onChange={setLaterText}
+                        tone={plan.creditAmount > 0 ? 'warn' : 'plain'}
+                      />
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <label htmlFor="bill-extra" className="text-ink-500">
+                    Extra for next time
+                  </label>
+                  <span className="flex items-center gap-1.5">
+                    {plan.owedBefore > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setExtraText(plainAmount(plan.owedBefore))}
+                        className="h-7 rounded-full bg-danger-100 px-2.5 text-[11px] font-bold text-danger-600 hover:brightness-95"
+                      >
+                        Clear {formatINR(plan.owedBefore)} owed
+                      </button>
+                    )}
+                    <AmountInput
+                      id="bill-extra"
+                      value={extraText}
+                      placeholder="0"
+                      ariaLabel="Extra amount kept as advance"
+                      onChange={setExtraText}
+                      tone={plan.walletTopUp > 0 ? 'ok' : 'plain'}
+                      sign="+"
+                    />
+                  </span>
+                </div>
+              </>
+            )}
+
+            <div className="flex justify-between border-t border-surface-200 pt-1.5 text-lg font-bold">
+              <span>Taking now</span>
+              <span className="tabular-nums">{formatINR(plan.tenderTarget)}</span>
+            </div>
+            {plan.creditAmount > 0 && (
+              <p className="text-right text-xs font-semibold text-warn-600">
+                {formatINR(plan.creditAmount)} goes on {customer?.name ?? 'the guest'}'s account
+              </p>
             )}
           </div>
 
@@ -447,7 +601,10 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
           </div>
 
           <Button size="lg" className="w-full" disabled={!canSettle} onClick={settle}>
-            <ReceiptIndianRupee className="size-5" /> Take payment · {formatINR(preview.total)}
+            <ReceiptIndianRupee className="size-5" />
+            {plan.tenderTarget > 0
+              ? `Take payment · ${formatINR(plan.tenderTarget)}`
+              : 'Settle bill · nothing to collect'}
           </Button>
           {canSettle && isSplit && (
             <p className="text-center text-xs font-semibold text-ink-500">
@@ -463,18 +620,41 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
         </div>
       }
     >
-      {first?.customerName && (
-        <p className="mb-1 flex items-center gap-2 text-sm font-semibold">
-          <User className="size-4 text-ink-300" />
-          {first.customerName}
-          {first.customerPhone && <span className="font-normal text-ink-500">· {first.customerPhone}</span>}
-        </p>
+      {account ? (
+        <div className="mb-3">
+          <AccountSummary account={account} />
+          <button
+            type="button"
+            onClick={() => setAskingGuest(true)}
+            className="mt-1.5 text-xs font-bold text-accent-600 hover:underline"
+          >
+            Change guest
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAskingGuest(true)}
+          className="mb-3 flex w-full items-center justify-center gap-2 rounded-card border border-dashed border-surface-300 px-4 py-2.5 text-[13px] font-semibold text-ink-500 transition-colors hover:border-accent-500 hover:text-accent-600"
+        >
+          <UserPlus className="size-4" /> Add a guest — needed to pay later or use an advance
+        </button>
       )}
-      {profile && settings.loyalty.enabled && (
-        <p className="mb-3 text-xs text-ink-500">
-          {profile.visits} previous visit{profile.visits > 1 ? 's' : ''} · {availablePoints} pts balance
-        </p>
-      )}
+
+      <CustomerSheet
+        open={askingGuest}
+        onClose={() => setAskingGuest(false)}
+        title={table ? `Table ${table.name} · guest` : 'Guest'}
+        actionLabel="Attach to table"
+        skipLabel={customer ? 'Remove guest' : 'No guest'}
+        onPick={(picked) => {
+          setAskingGuest(false)
+          if (table) orderService.setSittingCustomer(table.id, picked?.id ?? null)
+          setWalletText(null)
+          setLaterText('')
+          setExtraText('')
+        }}
+      />
 
       <Button
         variant="secondary"
@@ -554,22 +734,27 @@ function AmountInput({
   ariaLabel,
   onChange,
   tone,
+  sign,
 }: {
   id?: string
   value: string
   placeholder?: string
   ariaLabel: string
   onChange: (value: string) => void
-  tone: 'plain' | 'ok'
+  tone: 'plain' | 'ok' | 'warn'
+  /** Which way the line moves the bill. Deducts by default. */
+  sign?: '−' | '+'
 }) {
   return (
     <span
       className={cn(
         'inline-flex h-9 items-baseline gap-0.5 rounded-xl bg-white px-2.5 ring-1 transition-all focus-within:ring-2 focus-within:ring-accent-500',
-        tone === 'ok' ? 'text-ok-600 ring-ok-600/50' : 'text-ink-700 ring-surface-200',
+        tone === 'ok' && 'text-ok-600 ring-ok-600/50',
+        tone === 'warn' && 'text-warn-600 ring-warn-600/50',
+        tone === 'plain' && 'text-ink-700 ring-surface-200',
       )}
     >
-      <span className="text-xs">−₹</span>
+      <span className="text-xs">{sign ?? '−'}₹</span>
       <input
         id={id}
         type="text"
