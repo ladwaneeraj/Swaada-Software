@@ -479,6 +479,7 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
                       value={walletText ?? plainAmount(plan.walletApplied)}
                       ariaLabel="Amount taken from the guest's advance"
                       onChange={setWalletText}
+                      onBlur={() => setWalletText(plainAmount(plan.walletApplied))}
                       tone={plan.walletApplied > 0 ? 'ok' : 'plain'}
                     />
                   </div>
@@ -504,6 +505,7 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
                         placeholder="0"
                         ariaLabel="Amount left on the guest's account"
                         onChange={setLaterText}
+                        onBlur={() => setLaterText(plan.creditAmount > 0 ? plainAmount(plan.creditAmount) : '')}
                         tone={plan.creditAmount > 0 ? 'warn' : 'plain'}
                       />
                     </span>
@@ -529,6 +531,7 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
                       placeholder="0"
                       ariaLabel="Extra amount kept as advance"
                       onChange={setExtraText}
+                      onBlur={() => setExtraText(plan.walletTopUp > 0 ? plainAmount(plan.walletTopUp) : '')}
                       tone={plan.walletTopUp > 0 ? 'ok' : 'plain'}
                       sign="+"
                     />
@@ -733,6 +736,7 @@ function AmountInput({
   placeholder,
   ariaLabel,
   onChange,
+  onBlur,
   tone,
   sign,
 }: {
@@ -741,6 +745,8 @@ function AmountInput({
   placeholder?: string
   ariaLabel: string
   onChange: (value: string) => void
+  /** Snap the box to the amount that was actually applied, on leaving it. */
+  onBlur?: () => void
   tone: 'plain' | 'ok' | 'warn'
   /** Which way the line moves the bill. Deducts by default. */
   sign?: '−' | '+'
@@ -764,6 +770,7 @@ function AmountInput({
         placeholder={placeholder}
         onFocus={(e) => e.currentTarget.select()}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
         className="w-16 bg-transparent text-right text-sm font-bold tabular-nums outline-none placeholder:font-normal placeholder:text-ink-300"
       />
     </span>
