@@ -468,6 +468,12 @@ export function seedSnapshot(): DBSnapshot {
         pointsPer100: 5,
         rupeesPerPoint: 1,
       },
+      sound: {
+        newOrderAlert: true,
+        volume: 0.8,
+        repeatUntilAcknowledged: true,
+        repeatSeconds: 25,
+      },
     },
     counters: { nextOrderNumber: 1042, nextBillNumber: 501 },
   })

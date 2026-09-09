@@ -21,17 +21,44 @@ const STORAGE_KEY = 'swaada.db.v1'
 
 type Listener = (snapshot: DBSnapshot) => void
 
+/** Shape every stored snapshot is measured against. Built once. */
+const DEFAULT_SETTINGS = seedSnapshot().settings
+
+/**
+ * Settings gain fields over time (sound alerts, loyalty, ...). Filling the
+ * missing ones from the seed keeps an existing snapshot usable instead of
+ * forcing a schema bump that would wipe the cafe's orders.
+ */
+function withSettingsDefaults(parsed: DBSnapshot): DBSnapshot {
+  const stored = parsed.settings ?? DEFAULT_SETTINGS
+  return {
+    ...parsed,
+    settings: {
+      ...DEFAULT_SETTINGS,
+      ...stored,
+      loyalty: { ...DEFAULT_SETTINGS.loyalty, ...stored.loyalty },
+      sound: { ...DEFAULT_SETTINGS.sound, ...stored.sound },
+    },
+  }
+}
+
 function loadInitial(): DBSnapshot {
+  const fresh = seedSnapshot()
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as DBSnapshot
-      if (parsed.schemaVersion === seedSnapshot().schemaVersion) return parsed
+      if (parsed.schemaVersion === fresh.schemaVersion) {
+        const migrated = withSettingsDefaults(parsed)
+        // Write the filled-in shape straight back, so other tabs reading
+        // localStorage never see a snapshot missing the newer fields.
+        persist(migrated)
+        return migrated
+      }
     }
   } catch {
     // Corrupt or unavailable storage: fall through to a fresh seed.
   }
-  const fresh = seedSnapshot()
   persist(fresh)
   return fresh
 }
@@ -56,7 +83,7 @@ function reloadFromStorage(): void {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
-      snapshot = JSON.parse(raw) as DBSnapshot
+      snapshot = withSettingsDefaults(JSON.parse(raw) as DBSnapshot)
       notify()
     }
   } catch {

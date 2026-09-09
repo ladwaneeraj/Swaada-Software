@@ -278,6 +278,17 @@ export interface CafeSettings {
     /** Rupee value of one point at redemption. */
     rupeesPerPoint: number
   }
+  /** Audible alert on the kitchen display. */
+  sound: {
+    /** Ring when a new round reaches the kitchen. */
+    newOrderAlert: boolean
+    /** 0-1, applied to the synthesised chime. */
+    volume: number
+    /** Keep re-ringing while a round sits untouched in New orders. */
+    repeatUntilAcknowledged: boolean
+    /** Seconds between those repeats. */
+    repeatSeconds: number
+  }
 }
 
 /* ------------------------------------------------------------------ */

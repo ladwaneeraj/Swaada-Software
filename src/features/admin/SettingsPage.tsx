@@ -1,15 +1,28 @@
-import { RotateCcw } from 'lucide-react'
+import { RotateCcw, Volume2 } from 'lucide-react'
 import { useState } from 'react'
 import { PageHeader } from '@/components/layout/AdminLayout'
 import { useToasts } from '@/components/toast'
-import { Badge, Button, Card, Field, Input, Modal, Toggle } from '@/components/ui'
+import { Badge, Button, Card, Field, Input, Modal, Segmented, Toggle } from '@/components/ui'
 import { byDisplayOrder } from '@/lib/utils'
+import { playOrderChime } from '@/lib/sound'
 import { settingsService } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
+
+/* Three named steps read better than a slider on a touch screen, and they
+   keep the stored value inside the 0-1 range the chime expects. */
+const VOLUME_LEVELS = { low: 0.45, medium: 0.8, loud: 1 } as const
+type VolumeKey = keyof typeof VOLUME_LEVELS
+
+function volumeKey(volume: number): VolumeKey {
+  if (volume <= 0.55) return 'low'
+  if (volume <= 0.9) return 'medium'
+  return 'loud'
+}
 
 /** Café-level configuration: identity, loyalty, stations, demo data. */
 export function SettingsPage() {
   const settings = useAppStore((s) => s.db.settings)
+  const sound = useAppStore((s) => s.db.settings.sound)
   const stations = useAppStore((s) => s.db.stations)
   const connection = useAppStore((s) => s.connection)
   const pushToast = useToasts((s) => s.push)
@@ -98,6 +111,87 @@ export function SettingsPage() {
               }
             />
           </Field>
+        </div>
+      </Card>
+
+      <Card className="mb-5 p-5">
+        <div className="mb-1 flex items-center justify-between gap-4">
+          <h2 className="text-base font-bold">Kitchen alert sound</h2>
+          <Toggle
+            checked={sound.newOrderAlert}
+            onChange={(newOrderAlert) => {
+              settingsService.update({ sound: { ...sound, newOrderAlert } })
+              pushToast(newOrderAlert ? 'Kitchen rings on every new order' : 'Kitchen alert sound off', 'ok')
+            }}
+            label="New order alert sound"
+          />
+        </div>
+        <p className="mb-4 text-sm text-ink-500">
+          A door chime plays on the kitchen display the moment a round is sent. The display stays
+          silent until someone touches it once after opening it — that is a browser rule, not a
+          setting, and the kitchen screen shows a prompt when it applies.
+        </p>
+
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-4 rounded-xl bg-surface-100 px-4 py-3">
+            <p className="text-sm font-semibold">Volume</p>
+            <Segmented<VolumeKey>
+              size="sm"
+              value={volumeKey(sound.volume)}
+              onChange={(key) => settingsService.update({ sound: { ...sound, volume: VOLUME_LEVELS[key] } })}
+              options={[
+                { value: 'low', label: 'Low' },
+                { value: 'medium', label: 'Medium' },
+                { value: 'loud', label: 'Loud' },
+              ]}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-4 rounded-xl bg-surface-100 px-4 py-3">
+            <div>
+              <p className="text-sm font-semibold">Keep ringing until the kitchen starts the order</p>
+              <p className="text-xs text-ink-500">
+                Rings again every {sound.repeatSeconds}s while a round is still sitting in New
+                orders, and stops on "Start preparing".
+              </p>
+            </div>
+            <Toggle
+              checked={sound.repeatUntilAcknowledged}
+              onChange={(repeatUntilAcknowledged) =>
+                settingsService.update({ sound: { ...sound, repeatUntilAcknowledged } })
+              }
+              label="Repeat until acknowledged"
+            />
+          </div>
+
+          {sound.repeatUntilAcknowledged && (
+            <div className="w-44">
+              <Field label="Seconds between repeats">
+                <Input
+                  type="number"
+                  min={5}
+                  max={300}
+                  value={sound.repeatSeconds}
+                  onChange={(e) =>
+                    settingsService.update({
+                      sound: { ...sound, repeatSeconds: Math.min(300, Math.max(5, Number(e.target.value) || 25)) },
+                    })
+                  }
+                />
+              </Field>
+            </div>
+          )}
+
+          <Button
+            variant="secondary"
+            onClick={() => {
+              void playOrderChime(sound.volume).then((played) => {
+                if (!played) pushToast('The browser is holding sound back — tap the kitchen screen once', 'warn')
+              })
+            }}
+          >
+            <Volume2 className="size-4" /> Play test sound
+          </Button>
         </div>
       </Card>
 
