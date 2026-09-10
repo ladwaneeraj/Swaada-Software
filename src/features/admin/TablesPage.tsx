@@ -2,7 +2,7 @@ import { Minus, Pencil, PencilLine, Plus, ReceiptIndianRupee, Search, UserPlus, 
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/layout/AdminLayout'
-import { AccountSummary, CustomerSheet, useAccount } from '@/components/customer/CustomerBits'
+import { CustomerSheet, GuestChip, useAccount } from '@/components/customer/CustomerBits'
 import { useToasts } from '@/components/toast'
 import { Badge, Button, Field, Input, Modal, Textarea, Toggle, VegMark } from '@/components/ui'
 import { FLOOR_STATE_META, ORDER_STATUS_META, PAYMENT_METHOD_META, paymentSummary } from '@/lib/statusMeta'
@@ -353,7 +353,6 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
   })
 
   const payments: BillPayments = { cash, upi }
-  const isSplit = cash > 0 && upi > 0
   /** True when the wallet is doing something to this bill. */
   const onWallet = plan.tenderTarget !== preview.total
   /** The boxes have to add up to what is actually being collected. */
@@ -412,14 +411,13 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
       title={table ? `Table ${table.name} · running bill` : 'Running bill'}
       position="sheet"
       footer={
-        <div className="space-y-3">
-          {/* The bill: what it adds up to, and what the wallet does to it. */}
-          <div className="space-y-1 text-sm">
-            <div className="flex justify-between text-ink-500">
-              <span>Subtotal</span>
-              <span className="tabular-nums">{formatINR(preview.subtotal)}</span>
-            </div>
-            <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          {/* Bill maths on one line: the discount is the only thing typed. */}
+          <div className="flex items-center justify-between gap-3 text-[13px]">
+            <span className="text-ink-500">
+              Subtotal <b className="ml-1 tabular-nums text-ink-900">{formatINR(preview.subtotal)}</b>
+            </span>
+            <span className="flex items-center gap-1.5">
               <label htmlFor="bill-discount" className="text-ink-500">
                 Discount
               </label>
@@ -434,171 +432,152 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
                 }}
                 tone={preview.discountAmount > 0 ? 'ok' : 'plain'}
               />
-            </div>
-            <div
-              className={cn(
-                'flex justify-between border-t border-surface-200 pt-1.5 font-bold',
-                onWallet ? 'text-base' : 'text-lg',
-              )}
-            >
-              <span>To pay</span>
-              <span className="tabular-nums">{formatINR(preview.total)}</span>
-            </div>
+            </span>
+          </div>
 
-            {/* One tap, no typing: the wallet pays as much as it can. */}
-            {customer && held > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  setUseWallet(!useWallet)
-                  setTender(null)
-                }}
-                aria-pressed={useWallet}
-                className="flex w-full items-center justify-between gap-2 rounded-xl px-1 py-0.5 text-left hover:bg-white"
+          {/* The wallet: one tap, no typing. */}
+          {customer && held > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setUseWallet(!useWallet)
+                setTender(null)
+              }}
+              aria-pressed={useWallet}
+              className="flex w-full items-center justify-between gap-2 rounded-xl bg-white px-2.5 py-1.5 text-[13px] ring-1 ring-surface-200 transition-all hover:shadow-card"
+            >
+              <span className="flex items-center gap-1.5 text-ink-500">
+                <Wallet className="size-3.5" />
+                Wallet <span className="text-ink-300">({formatINR(held)} in it)</span>
+              </span>
+              <span
+                className={cn(
+                  'rounded-lg px-2 py-0.5 text-[13px] font-bold tabular-nums',
+                  useWallet ? 'bg-ok-100 text-ok-600' : 'bg-surface-200 text-ink-500',
+                )}
               >
-                <span className="flex items-center gap-1.5 text-ink-500">
-                  <Wallet className="size-3.5" />
-                  Wallet <span className="text-ink-300">({formatINR(held)} in it)</span>
-                </span>
-                <span
-                  className={cn(
-                    'rounded-lg px-2 py-0.5 text-[13px] font-bold tabular-nums',
-                    useWallet ? 'bg-ok-100 text-ok-600' : 'bg-surface-200 text-ink-500',
-                  )}
-                >
-                  {useWallet ? `−${formatINR(walletApplied)}` : 'not used'}
-                </span>
-              </button>
-            )}
-
-            {onWallet && (
-              <div className="flex justify-between border-t border-surface-200 pt-1.5 text-lg font-bold">
-                <span>Taking now</span>
-                <span className="tabular-nums">{formatINR(plan.tenderTarget)}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Payment */}
-          <div>
-            <div className="mb-1.5 flex items-center justify-between gap-2">
-              <span className="text-xs font-bold uppercase tracking-wide text-ink-500">Payment</span>
-              <div className="flex gap-1">
-                {PAYMENT_METHODS.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => allIn(m)}
-                    className="h-7 rounded-full bg-white px-3 text-[11px] font-bold text-ink-700 shadow-card ring-1 ring-surface-200 transition-all hover:text-ink-900 hover:shadow-lift"
-                  >
-                    All {PAYMENT_METHOD_META[m].label}
-                  </button>
-                ))}
-                {customer && plan.owedBefore > 0 && !payLater && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setTender({ cash: plainAmount(round2(due + plan.owedBefore)), upi: '0' })
-                    }
-                    className="h-7 rounded-full bg-danger-100 px-3 text-[11px] font-bold text-danger-600 transition-all hover:brightness-95"
-                  >
-                    + Owed {formatINR(plan.owedBefore)}
-                  </button>
-                )}
-                {customer && settings.wallet.allowPayLater && (
-                  <button
-                    type="button"
-                    aria-pressed={payLater}
-                    onClick={() => {
-                      const next = !payLater
-                      setPayLater(next)
-                      // Turning it on means nothing is being handed over yet,
-                      // which is the usual reason for reaching for it.
-                      setTender(next ? { cash: '0', upi: '0' } : null)
-                    }}
-                    className={cn(
-                      'h-7 rounded-full px-3 text-[11px] font-bold transition-all',
-                      payLater
-                        ? 'bg-ink-900 text-white shadow-card'
-                        : 'bg-white text-ink-700 shadow-card ring-1 ring-surface-200 hover:text-ink-900 hover:shadow-lift',
-                    )}
-                  >
-                    Pay later
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {PAYMENT_METHODS.map((m) => (
-                <label
-                  key={m}
-                  className={cn(
-                    'flex cursor-text items-center gap-2.5 rounded-2xl bg-white px-3.5 py-2.5 ring-1 transition-all focus-within:ring-2 focus-within:ring-accent-500',
-                    payments[m] > 0 ? 'bg-accent-50 shadow-card ring-accent-500/60' : 'ring-surface-200',
-                  )}
-                >
-                  <span aria-hidden className="text-base">
-                    {PAYMENT_METHOD_META[m].icon}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-[11px] font-bold uppercase tracking-wide text-ink-500">
-                      {PAYMENT_METHOD_META[m].label}
-                    </span>
-                    <span className="flex items-baseline gap-0.5">
-                      <span className="text-sm text-ink-300">₹</span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        aria-label={`${PAYMENT_METHOD_META[m].label} amount`}
-                        value={boxes[m]}
-                        onFocus={(e) => e.currentTarget.select()}
-                        onChange={(e) => setLeg(m, e.target.value)}
-                        onBlur={() => setLeg(m, plainAmount(payments[m]))}
-                        className="w-full min-w-0 bg-transparent text-base font-bold tabular-nums outline-none"
-                      />
-                    </span>
-                  </span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Where the wallet lands, in one sentence, whichever way it moved. */}
-          {customer && onWallet && (
-            <p
-              className={cn(
-                'text-center text-xs font-bold',
-                plan.balanceAfter < 0 ? 'text-warn-600' : 'text-ok-600',
-              )}
-            >
-              {plan.balanceAfter < 0
-                ? `${customer.name} will owe ${formatINR(walletOwed(plan.balanceAfter))}`
-                : plan.balanceAfter > 0
-                  ? `${formatINR(plan.balanceAfter)} left in ${customer.name}'s wallet`
-                  : `${customer.name}'s wallet is square`}
-            </p>
+                {useWallet ? `−${formatINR(walletApplied)}` : 'not used'}
+              </span>
+            </button>
           )}
 
-          <Button size="lg" className="w-full" disabled={!canSettle} onClick={settle}>
-            <ReceiptIndianRupee className="size-5" />
+          {/* The one number that matters, with the bill behind it when they differ. */}
+          <div className="flex items-baseline justify-between gap-3 border-t border-surface-200 pt-2">
+            <span className="text-sm font-bold">
+              Taking now
+              {onWallet && (
+                <span className="ml-1.5 text-[11px] font-semibold text-ink-500">
+                  bill {formatINR(preview.total)}
+                </span>
+              )}
+            </span>
+            <span className="text-xl font-bold tabular-nums">{formatINR(plan.tenderTarget)}</span>
+          </div>
+
+          {/* Payment: two boxes, and the shortcuts on the same line. */}
+          <div className="flex items-center gap-1.5">
+            {PAYMENT_METHODS.map((m) => (
+              <label
+                key={m}
+                className={cn(
+                  'flex min-w-0 flex-1 cursor-text items-center gap-1.5 rounded-xl bg-white px-2.5 py-1.5 ring-1 transition-all focus-within:ring-2 focus-within:ring-accent-500',
+                  payments[m] > 0 ? 'bg-accent-50 shadow-card ring-accent-500/60' : 'ring-surface-200',
+                )}
+              >
+                <span aria-hidden className="text-sm">
+                  {PAYMENT_METHOD_META[m].icon}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[10px] font-bold uppercase leading-tight tracking-wide text-ink-500">
+                    {PAYMENT_METHOD_META[m].label}
+                  </span>
+                  <span className="flex items-baseline gap-0.5">
+                    <span className="text-xs text-ink-300">₹</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      aria-label={`${PAYMENT_METHOD_META[m].label} amount`}
+                      value={boxes[m]}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onChange={(e) => setLeg(m, e.target.value)}
+                      onBlur={() => setLeg(m, plainAmount(payments[m]))}
+                      className="w-full min-w-0 bg-transparent text-[15px] font-bold leading-tight tabular-nums outline-none"
+                    />
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1">
+            {PAYMENT_METHODS.map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => allIn(m)}
+                className="h-7 rounded-full bg-white px-2.5 text-[11px] font-bold text-ink-700 shadow-card ring-1 ring-surface-200 transition-all hover:text-ink-900 hover:shadow-lift"
+              >
+                All {PAYMENT_METHOD_META[m].label}
+              </button>
+            ))}
+            {customer && plan.owedBefore > 0 && !payLater && (
+              <button
+                type="button"
+                onClick={() => setTender({ cash: plainAmount(round2(due + plan.owedBefore)), upi: '0' })}
+                className="h-7 rounded-full bg-danger-100 px-2.5 text-[11px] font-bold text-danger-600 transition-all hover:brightness-95"
+              >
+                + Owed {formatINR(plan.owedBefore)}
+              </button>
+            )}
+            {customer && settings.wallet.allowPayLater && (
+              <button
+                type="button"
+                aria-pressed={payLater}
+                onClick={() => {
+                  const next = !payLater
+                  setPayLater(next)
+                  setTender(next ? { cash: '0', upi: '0' } : null)
+                }}
+                className={cn(
+                  'h-7 rounded-full px-2.5 text-[11px] font-bold transition-all',
+                  payLater
+                    ? 'bg-ink-900 text-white shadow-card'
+                    : 'bg-white text-ink-700 shadow-card ring-1 ring-surface-200 hover:text-ink-900 hover:shadow-lift',
+                )}
+              >
+                Pay later
+              </button>
+            )}
+            {customer && onWallet && (
+              <span
+                className={cn(
+                  'ml-auto text-[11px] font-bold',
+                  plan.balanceAfter < 0 ? 'text-warn-600' : 'text-ok-600',
+                )}
+              >
+                {plan.balanceAfter < 0
+                  ? `owes ${formatINR(walletOwed(plan.balanceAfter))} after`
+                  : plan.balanceAfter > 0
+                    ? `${formatINR(plan.balanceAfter)} left in wallet`
+                    : 'wallet square after'}
+              </span>
+            )}
+          </div>
+
+          <Button className="w-full" disabled={!canSettle} onClick={settle}>
+            <ReceiptIndianRupee className="size-4" />
             {plan.tenderTarget > 0
               ? `Take payment · ${formatINR(plan.tenderTarget)}`
               : 'Settle bill · nothing to collect'}
           </Button>
-          {canSettle && isSplit && (
-            <p className="text-center text-xs font-semibold text-ink-500">
-              Split as {paymentSummary(payments)}
-            </p>
-          )}
           {!addsUp && rounds.length > 0 && (
-            <p className="text-center text-xs font-semibold text-danger-600">
-              {formatINR(Math.abs(round2(due - tendered)))}{' '}
-              {tendered < due ? 'short' : 'over'} — add a guest to put it on a wallet, or fix the
-              amounts.
+            <p className="text-center text-[11px] font-semibold text-danger-600">
+              {formatINR(Math.abs(round2(due - tendered)))} {tendered < due ? 'short' : 'over'} — add a
+              guest to put it on a wallet, or fix the amounts.
             </p>
           )}
           {!canSettle && addsUp && rounds.length > 0 && (
-            <p className="text-center text-xs font-semibold text-warn-600">
+            <p className="text-center text-[11px] font-semibold text-warn-600">
               {pendingInKitchen.length} round{pendingInKitchen.length > 1 ? 's' : ''} still with the
               kitchen — settle once everything is delivered.
             </p>
@@ -606,24 +585,18 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
         </div>
       }
     >
+      {/* One line for the guest, so the rounds get the room. */}
       {account ? (
-        <div className="mb-3">
-          <AccountSummary account={account} />
-          <button
-            type="button"
-            onClick={() => setAskingGuest(true)}
-            className="mt-1.5 text-xs font-bold text-accent-600 hover:underline"
-          >
-            Change guest
-          </button>
+        <div className="mb-2.5">
+          <GuestChip account={account} onChange={() => setAskingGuest(true)} />
         </div>
       ) : (
         <button
           type="button"
           onClick={() => setAskingGuest(true)}
-          className="mb-3 flex w-full items-center justify-center gap-2 rounded-card border border-dashed border-surface-300 px-4 py-2.5 text-[13px] font-semibold text-ink-500 transition-colors hover:border-accent-500 hover:text-accent-600"
+          className="mb-2.5 flex w-full items-center justify-center gap-2 rounded-full border border-dashed border-surface-300 py-1.5 text-[12px] font-semibold text-ink-500 transition-colors hover:border-accent-500 hover:text-accent-600"
         >
-          <UserPlus className="size-4" /> Add a guest — needed for pay later and wallets
+          <UserPlus className="size-3.5" /> Add a guest for wallet and pay later
         </button>
       )}
 
@@ -644,7 +617,8 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
 
       <Button
         variant="secondary"
-        className="mb-4 w-full"
+        size="sm"
+        className="mb-3 w-full"
         onClick={() => {
           onClose()
           if (table) navigate(`/admin/take-order/${table.id}`)
