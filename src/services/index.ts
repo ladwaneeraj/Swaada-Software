@@ -427,55 +427,22 @@ export const orderService = {
 export interface BillPreview {
   subtotal: number
   discountAmount: number
-  maxRedeemablePoints: number
-  pointsRedeemed: number
-  pointsValueRedeemed: number
   total: number
-  pointsToEarn: number
 }
 
 /**
  * The ONE place bill arithmetic lives: the settle sheet preview and the
- * actual settlement both call this, so what the admin sees is what gets
- * charged. The discount is a flat rupee amount off the subtotal; loyalty
- * points then come off what remains. No tax is applied.
+ * actual settlement both call this, so what the cashier sees is what gets
+ * charged. The discount is a flat rupee amount off the subtotal, and no tax
+ * is applied anywhere.
  */
 export function computeBillPreview(input: {
   rounds: Order[]
-  settings: CafeSettings
   discountAmount?: number
-  redeemPoints?: number
-  availablePoints?: number
-  hasCustomer?: boolean
 }): BillPreview {
-  const { settings } = input
-  const subtotal = round2(input.rounds.reduce((s, o) => s + o.total, 0))
+  const subtotal = round2(input.rounds.reduce((sum, o) => sum + o.total, 0))
   const discountAmount = round2(clamp(input.discountAmount ?? 0, 0, subtotal))
-  const preTotal = round2(subtotal - discountAmount)
-
-  const { enabled, rupeesPerPoint, pointsPer100 } = settings.loyalty
-  const maxRedeemablePoints =
-    enabled && rupeesPerPoint > 0
-      ? Math.min(input.availablePoints ?? 0, Math.floor(preTotal / rupeesPerPoint))
-      : 0
-  const pointsRedeemed = Math.min(Math.max(0, Math.floor(input.redeemPoints ?? 0)), maxRedeemablePoints)
-  const pointsValueRedeemed = round2(pointsRedeemed * rupeesPerPoint)
-  const total = round2(preTotal - pointsValueRedeemed)
-  const pointsToEarn = enabled && input.hasCustomer ? Math.floor(total / 100) * pointsPer100 : 0
-
-  return { subtotal, discountAmount, maxRedeemablePoints, pointsRedeemed, pointsValueRedeemed, total, pointsToEarn }
-}
-
-/**
- * Split a bill total across cash and UPI. `amount` is what the guest hands
- * over in `method`; the other method covers the rest. Deriving the second
- * leg instead of accepting two free inputs makes a bill that does not add
- * up to the total unrepresentable.
- */
-export function splitPayment(total: number, method: PaymentMethod, amount: number): BillPayments {
-  const paid = round2(clamp(amount, 0, total))
-  const rest = round2(total - paid)
-  return method === 'cash' ? { cash: paid, upi: rest } : { cash: rest, upi: paid }
+  return { subtotal, discountAmount, total: round2(subtotal - discountAmount) }
 }
 
 /** Methods that actually contributed to a bill, in PAYMENT_METHODS order. */
@@ -487,8 +454,8 @@ export function paidMethods(payments: BillPayments): Array<[PaymentMethod, numbe
 
 /* ------------------------------ Customers ------------------------------- */
 /* A guest is identified by their mobile number and nothing else. The record  */
-/* holds only what a person typed; visits, spend and points stay derived from */
-/* bills, and the money side lives in the wallet ledger below.                */
+/* holds only what a person typed; visits and spend stay derived from bills,  */
+/* and the money side lives in the wallet ledger below.                       */
 
 /** Digits only, last ten: "+91 98765 43210" and "9876543210" are one guest. */
 export function normalisePhone(input: string): string {
@@ -571,13 +538,13 @@ export function walletLedger(entries: WalletEntry[], customerId: ID): WalletEntr
   return entries.filter((e) => e.customerId === customerId).sort((a, b) => b.at.localeCompare(a.at))
 }
 
-/** What the guest owes right now, as a positive number (0 when in credit). */
-export function amountOwed(balance: number): number {
+/** What the guest owes right now, positive (0 when they are in credit). */
+export function walletOwed(balance: number): number {
   return balance < 0 ? round2(-balance) : 0
 }
 
-/** Advance the cafe is holding, as a positive number (0 when they owe). */
-export function advanceHeld(balance: number): number {
+/** Money the cafe is holding for them, positive (0 when they owe). */
+export function walletHeld(balance: number): number {
   return balance > 0 ? round2(balance) : 0
 }
 
@@ -609,7 +576,7 @@ function walletEntry(input: {
 export const walletService = {
   /**
    * Money handed over at the counter with no bill attached. It clears what
-   * the guest owes first and whatever is left stays as advance — one entry
+   * the guest owes first and whatever is left stays in the wallet — one entry
    * either way, since the balance is a single running number.
    */
   takeMoney(input: {
@@ -622,7 +589,7 @@ export const walletService = {
     const amount = round2(Math.max(0, input.amount))
     if (amount <= 0) return
     db.mutate((draft) => {
-      const owed = amountOwed(walletBalance(draft.walletEntries, input.customerId))
+      const owed = walletOwed(walletBalance(draft.walletEntries, input.customerId))
       draft.walletEntries.push(
         walletEntry({ ...input, amount, kind: owed > 0 ? 'repayment' : 'topup' }),
       )
@@ -630,7 +597,7 @@ export const walletService = {
     })
   },
 
-  /** Hand an advance back. Never more than the cafe is actually holding. */
+  /** Hand wallet money back. Never more than the cafe is actually holding. */
   returnMoney(input: {
     customerId: ID
     amount: number
@@ -639,7 +606,7 @@ export const walletService = {
     note?: string
   }): void {
     db.mutate((draft) => {
-      const held = advanceHeld(walletBalance(draft.walletEntries, input.customerId))
+      const held = walletHeld(walletBalance(draft.walletEntries, input.customerId))
       const amount = round2(clamp(input.amount, 0, held))
       if (amount <= 0) return
       draft.walletEntries.push(walletEntry({ ...input, amount: -amount, kind: 'refund' }))
@@ -670,9 +637,6 @@ export interface CustomerProfile {
   visits: number
   totalSpent: number
   lastVisitAt: string
-  pointsEarned: number
-  pointsRedeemed: number
-  pointsBalance: number
 }
 
 export function customerProfiles(bills: Bill[]): CustomerProfile[] {
@@ -686,17 +650,11 @@ export function customerProfiles(bills: Bill[]): CustomerProfile[] {
       visits: 0,
       totalSpent: 0,
       lastVisitAt: bill.settledAt,
-      pointsEarned: 0,
-      pointsRedeemed: 0,
-      pointsBalance: 0,
     }
     profile.name = bill.customerName || profile.name
     profile.visits += 1
     profile.totalSpent = round2(profile.totalSpent + bill.total)
     profile.lastVisitAt = bill.settledAt
-    profile.pointsEarned += bill.pointsEarned
-    profile.pointsRedeemed += bill.pointsRedeemed
-    profile.pointsBalance = profile.pointsEarned - profile.pointsRedeemed
     byPhone.set(bill.customerPhone, profile)
   }
   return [...byPhone.values()].sort((a, b) => b.lastVisitAt.localeCompare(a.lastVisitAt))
@@ -717,8 +675,7 @@ export interface CustomerAccount {
   visits: number
   totalSpent: number
   lastVisitAt?: string
-  pointsBalance: number
-  /** + advance the cafe holds, − what the guest owes. */
+  /** + money the cafe holds in the wallet, − what the guest owes. */
   balance: number
 }
 
@@ -736,7 +693,6 @@ export function customerAccounts(input: {
         visits: s?.visits ?? 0,
         totalSpent: s?.totalSpent ?? 0,
         lastVisitAt: s?.lastVisitAt,
-        pointsBalance: s?.pointsBalance ?? 0,
         balance: walletBalance(input.walletEntries, customer.id),
       }
     })
@@ -751,29 +707,29 @@ export function billsForCustomer(bills: Bill[], customer: Customer): Bill[] {
 }
 
 /**
- * How one settlement is put together, in the order money moves: advance
- * first, then whatever the guest hands over now, then anything left on the
- * account. The settle sheet and the service both call this, so what the
+ * How one settlement is put together, in the order money moves: the wallet
+ * first, then whatever the guest hands over now, then anything left for them
+ * to pay later. The settle sheet and the service both call this, so what the
  * cashier sees on screen is exactly what gets written.
  */
 export interface SettlementPlan {
   total: number
-  /** Taken out of the advance the cafe is already holding. */
+  /** Taken out of the wallet money the cafe is already holding. */
   walletApplied: number
-  /** Left on the guest's account to pay next time. */
+  /** Left on the guest's wallet to pay next time. */
   creditAmount: number
-  /** Handed over beyond this bill and kept as advance. */
+  /** Handed over beyond this bill and kept in the wallet. */
   walletTopUp: number
   /** What cash + UPI must add up to. */
   tenderTarget: number
-  advanceAvailable: number
+  walletAvailable: number
   owedBefore: number
   balanceAfter: number
 }
 
 export function planSettlement(input: {
   total: number
-  /** The guest's balance before this bill: + advance held, − owed. */
+  /** The wallet before this bill: + money held, − owed. */
   balance: number
   hasCustomer: boolean
   allowPayLater: boolean
@@ -781,9 +737,9 @@ export function planSettlement(input: {
   creditAmount?: number
   walletTopUp?: number
 }): SettlementPlan {
-  const advanceAvailable = advanceHeld(input.balance)
+  const walletAvailable = walletHeld(input.balance)
   const walletApplied = input.hasCustomer
-    ? round2(clamp(input.walletApplied ?? 0, 0, Math.min(advanceAvailable, input.total)))
+    ? round2(clamp(input.walletApplied ?? 0, 0, Math.min(walletAvailable, input.total)))
     : 0
   const creditAmount =
     input.hasCustomer && input.allowPayLater
@@ -797,8 +753,8 @@ export function planSettlement(input: {
     creditAmount,
     walletTopUp,
     tenderTarget: round2(input.total - walletApplied - creditAmount + walletTopUp),
-    advanceAvailable,
-    owedBefore: amountOwed(input.balance),
+    walletAvailable,
+    owedBefore: walletOwed(input.balance),
     balanceAfter: round2(input.balance - walletApplied - creditAmount + walletTopUp),
   }
 }
@@ -806,7 +762,7 @@ export function planSettlement(input: {
 export const billService = {
   /**
    * Settle a table: group all of its delivered rounds into one Bill (with an
-   * optional flat discount and loyalty redemption), record how it was paid,
+   * optional flat discount), record how it was paid,
    * move the guest's account, and free the table. Refuses while any round is
    * still with the kitchen.
    */
@@ -816,8 +772,7 @@ export const billService = {
     payments: BillPayments
     session: Session
     discountAmount?: number
-    redeemPoints?: number
-    /** Account legs. Ignored when the sitting has no guest attached. */
+    /** Wallet legs. Ignored when the sitting has no guest attached. */
     walletApplied?: number
     creditAmount?: number
     walletTopUp?: number
@@ -833,20 +788,12 @@ export const billService = {
       const customer =
         customerService.byId(draft.customers, first?.customerId) ??
         (phone ? customerService.find(draft.customers, phone) : undefined)
-      const available = phone ? (customerByPhone(draft.bills, phone)?.pointsBalance ?? 0) : 0
-      const preview = computeBillPreview({
-        rounds: open,
-        settings: draft.settings,
-        discountAmount: input.discountAmount,
-        redeemPoints: input.redeemPoints,
-        availablePoints: available,
-        hasCustomer: Boolean(phone),
-      })
+      const preview = computeBillPreview({ rounds: open, discountAmount: input.discountAmount })
       const plan = planSettlement({
         total: preview.total,
         balance: walletBalance(draft.walletEntries, customer?.id),
         hasCustomer: Boolean(customer),
-        allowPayLater: draft.settings.accounts.allowPayLater,
+        allowPayLater: draft.settings.wallet.allowPayLater,
         walletApplied: input.walletApplied,
         creditAmount: input.creditAmount,
         walletTopUp: input.walletTopUp,
@@ -868,9 +815,6 @@ export const billService = {
         customerPhone: customer?.phone ?? phone,
         subtotal: preview.subtotal,
         discountAmount: preview.discountAmount,
-        pointsRedeemed: preview.pointsRedeemed,
-        pointsValueRedeemed: preview.pointsValueRedeemed,
-        pointsEarned: preview.pointsToEarn,
         total: preview.total,
         payments: input.payments,
         walletApplied: plan.walletApplied,
@@ -919,18 +863,18 @@ export const billService = {
 /**
  * Two different questions a cafe asks at closing time, kept apart on purpose:
  * what was SOLD today, and what was COLLECTED today. They differ by exactly
- * the amount that was eaten on credit, paid out of an old advance, or handed
- * over for later — so the drawer reconciles even when guests pay on their
- * own schedule.
+ * the amount that was eaten on credit, paid out of a wallet, or handed over
+ * for later — so the drawer reconciles even when guests pay on their own
+ * schedule.
  */
 export interface DayMoney {
   sales: number
   collected: number
   cash: number
   upi: number
-  fromAdvance: number
+  fromWallet: number
   leftUnpaid: number
-  advanceTaken: number
+  walletTopUps: number
 }
 
 export function moneyForDay(input: {
@@ -958,9 +902,9 @@ export function moneyForDay(input: {
     collected: round2(cash + upi),
     cash,
     upi,
-    fromAdvance: round2(bills.reduce((s, b) => s + b.walletApplied, 0)),
+    fromWallet: round2(bills.reduce((s, b) => s + b.walletApplied, 0)),
     leftUnpaid: round2(bills.reduce((s, b) => s + b.creditAmount, 0)),
-    advanceTaken: round2(
+    walletTopUps: round2(
       bills.reduce((s, b) => s + b.walletTopUp, 0) +
         counter.filter((e) => e.amount > 0).reduce((s, e) => s + e.amount, 0),
     ),

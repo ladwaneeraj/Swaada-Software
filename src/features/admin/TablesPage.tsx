@@ -1,4 +1,4 @@
-import { Minus, Pencil, PencilLine, Plus, ReceiptIndianRupee, Search, Sparkles, UserPlus, Users } from 'lucide-react'
+import { Minus, Pencil, PencilLine, Plus, ReceiptIndianRupee, Search, UserPlus, Users, Wallet } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/layout/AdminLayout'
@@ -10,19 +10,18 @@ import { byDisplayOrder, cn, elapsedLabel, formatINR, parseAmount, round2 } from
 import { useNow } from '@/lib/useNow'
 import {
   activeOrdersForTable,
-  advanceHeld,
   billService,
   computeBillPreview,
-  customerByPhone,
   floorState,
   orderService,
   planSettlement,
-  splitPayment,
   tableService,
   walletBalance,
+  walletHeld,
+  walletOwed,
 } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
-import type { CafeTable, Customer, Order, PaymentMethod } from '@/types'
+import type { BillPayments, CafeTable, Customer, Order, PaymentMethod } from '@/types'
 import { FLOOR_STATES, PAYMENT_METHODS } from '@/types'
 
 /**
@@ -285,7 +284,6 @@ function TileAction({
 function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose: () => void }) {
   const tables = useAppStore((s) => s.db.tables)
   const orders = useAppStore((s) => s.db.orders)
-  const bills = useAppStore((s) => s.db.bills)
   const settings = useAppStore((s) => s.db.settings)
   const session = useAppStore((s) => s.session)
   const navigate = useNavigate()
@@ -295,29 +293,26 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
   const customers = useAppStore((s) => s.db.customers)
 
   const [discountText, setDiscountText] = useState('')
-  /** Which box the cashier typed in; the other method covers the remainder. */
-  const [entry, setEntry] = useState<{ method: PaymentMethod; text: string } | null>(null)
-  const [redeem, setRedeem] = useState(false)
   const [voiding, setVoiding] = useState<Order | null>(null)
   const [voidReason, setVoidReason] = useState('')
   const [editingRound, setEditingRound] = useState<Order | null>(null)
-  /** null means "use the whole advance", the pre-filled default. */
-  const [walletText, setWalletText] = useState<string | null>(null)
-  const [laterText, setLaterText] = useState('')
-  const [extraText, setExtraText] = useState('')
+  /** Spend the guest's wallet money on this bill. On whenever they have any. */
+  const [useWallet, setUseWallet] = useState(true)
+  /** The rest of the bill goes on the wallet instead of being collected. */
+  const [payLater, setPayLater] = useState(false)
+  /** What is in the two cash boxes. null means "the whole amount in cash". */
+  const [tender, setTender] = useState<{ cash: string; upi: string } | null>(null)
   const [askingGuest, setAskingGuest] = useState(false)
 
   // Fresh sheet per table opening.
   useEffect(() => {
     setDiscountText('')
-    setEntry(null)
-    setRedeem(false)
     setVoiding(null)
     setVoidReason('')
     setEditingRound(null)
-    setWalletText(null)
-    setLaterText('')
-    setExtraText('')
+    setUseWallet(true)
+    setPayLater(false)
+    setTender(null)
   }, [tableId])
 
   const table = tables.find((t) => t.id === tableId)
@@ -330,54 +325,60 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
   const account = useAccount(customer?.id)
   const balance = walletBalance(walletEntries, customer?.id)
 
-  const profile = first?.customerPhone ? customerByPhone(bills, first.customerPhone) : undefined
-  const availablePoints = profile?.pointsBalance ?? 0
+  const preview = computeBillPreview({ rounds, discountAmount: parseAmount(discountText) })
 
-  const preview = computeBillPreview({
-    rounds,
-    settings,
-    discountAmount: parseAmount(discountText),
-    redeemPoints: redeem ? availablePoints : 0,
-    availablePoints,
-    hasCustomer: Boolean(first?.customerPhone),
-  })
+  /**
+   * The wallet is one running number: what the guest has with us, or what
+   * they owe. It pays as much of this bill as it can, and anything the guest
+   * does not hand over now goes back on it. That is the whole feature — no
+   * separate advance, credit and top-up to keep straight.
+   */
+  const held = walletHeld(balance)
+  const walletApplied = customer && useWallet ? Math.min(held, preview.total) : 0
+  const due = round2(preview.total - walletApplied)
 
-  // Advance is offered, never taken silently: it comes pre-filled and one tap
-  // clears it, so the cashier always sees it move.
-  const advance = advanceHeld(balance)
-  const requestedWallet =
-    walletText === null ? Math.min(advance, preview.total) : parseAmount(walletText)
+  const boxes = tender ?? { cash: plainAmount(due), upi: '0' }
+  const cash = Math.max(0, parseAmount(boxes.cash))
+  const upi = Math.max(0, parseAmount(boxes.upi))
+  const tendered = round2(cash + upi)
 
   const plan = planSettlement({
     total: preview.total,
     balance,
     hasCustomer: Boolean(customer),
-    allowPayLater: settings.accounts.allowPayLater,
-    walletApplied: requestedWallet,
-    creditAmount: parseAmount(laterText),
-    walletTopUp: parseAmount(extraText),
+    allowPayLater: settings.wallet.allowPayLater,
+    walletApplied,
+    creditAmount: Math.max(0, round2(due - tendered)),
+    walletTopUp: Math.max(0, round2(tendered - due)),
   })
 
-  // The split is derived, never free-typed twice, so the two legs always add
-  // up to what is being handed over — an unpayable bill is unrepresentable.
-  const entryMethod = entry?.method ?? 'cash'
-  const entryAmount = entry ? parseAmount(entry.text) : plan.tenderTarget
-  const payments = splitPayment(plan.tenderTarget, entryMethod, entryAmount)
-  const isSplit = payments.cash > 0 && payments.upi > 0
+  const payments: BillPayments = { cash, upi }
+  const isSplit = cash > 0 && upi > 0
+  /** True when the wallet is doing something to this bill. */
+  const onWallet = plan.tenderTarget !== preview.total
+  /** The boxes have to add up to what is actually being collected. */
+  const addsUp = Math.abs(tendered - plan.tenderTarget) < 0.01
 
   /**
-   * What a payment box shows. The box being typed into keeps its raw text
-   * (so it can be cleared, and the caret stays put); everything else — the
-   * other leg, and an amount above the bill — shows the settled value, so
-   * the two boxes on screen always add up to what is charged.
+   * Paying in full is the normal case, so the two boxes fill each other in.
+   * Once "pay later" is on, each box holds exactly what was handed over and
+   * the wallet takes the difference.
    */
-  const boxValue = (method: PaymentMethod): string =>
-    entry?.method === method && parseAmount(entry.text) <= plan.tenderTarget
-      ? entry.text
-      : plainAmount(payments[method])
+  const setLeg = (method: PaymentMethod, text: string) => {
+    if (payLater) {
+      setTender({ ...boxes, [method]: text })
+      return
+    }
+    const typed = Math.max(0, parseAmount(text))
+    const rest = plainAmount(Math.max(0, round2(due - typed)))
+    setTender(method === 'cash' ? { cash: text, upi: rest } : { cash: rest, upi: text })
+  }
+
+  const allIn = (method: PaymentMethod) =>
+    setTender(method === 'cash' ? { cash: plainAmount(due), upi: '0' } : { cash: '0', upi: plainAmount(due) })
 
   const pendingInKitchen = rounds.filter((o) => o.status !== 'delivered')
-  const canSettle = rounds.length > 0 && pendingInKitchen.length === 0
+  const canSettle = rounds.length > 0 && pendingInKitchen.length === 0 && addsUp
 
   const settle = () => {
     if (!table || !session || !canSettle) return
@@ -386,17 +387,15 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
       payments,
       session,
       discountAmount: parseAmount(discountText),
-      redeemPoints: redeem ? availablePoints : 0,
       walletApplied: plan.walletApplied,
       creditAmount: plan.creditAmount,
       walletTopUp: plan.walletTopUp,
     })
     if (bill) {
       const extras = [
-        bill.walletApplied > 0 && `${formatINR(bill.walletApplied)} from advance`,
-        bill.creditAmount > 0 && `${formatINR(bill.creditAmount)} on account`,
-        bill.walletTopUp > 0 && `${formatINR(bill.walletTopUp)} kept as advance`,
-        bill.pointsEarned > 0 && `+${bill.pointsEarned} pts`,
+        bill.walletApplied > 0 && `${formatINR(bill.walletApplied)} from wallet`,
+        bill.creditAmount > 0 && `${formatINR(bill.creditAmount)} on wallet`,
+        bill.walletTopUp > 0 && `${formatINR(bill.walletTopUp)} into wallet`,
       ].filter(Boolean)
       pushToast(
         `Bill #${bill.billNumber} · ${formatINR(bill.total)} (${paymentSummary(bill.payments)})${extras.length ? ` · ${extras.join(' · ')}` : ''} · ${table.name} is free`,
@@ -414,25 +413,7 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
       position="sheet"
       footer={
         <div className="space-y-3">
-          {/* Loyalty redemption */}
-          {settings.loyalty.enabled && availablePoints > 0 && (
-            <button
-              type="button"
-              onClick={() => setRedeem((r) => !r)}
-              aria-pressed={redeem}
-              className={cn(
-                'flex w-full items-center justify-between rounded-2xl px-3.5 py-2.5 text-[13px] font-semibold ring-1 transition-all',
-                redeem ? 'bg-ok-100 text-ok-600 shadow-card ring-ok-600/40' : 'bg-white text-ink-700 ring-surface-200 hover:shadow-card',
-              )}
-            >
-              <span className="flex items-center gap-2">
-                <Sparkles className="size-4" /> Redeem {preview.maxRedeemablePoints} pts
-              </span>
-              <span className="tabular-nums">−{formatINR(preview.maxRedeemablePoints * settings.loyalty.rupeesPerPoint)}</span>
-            </button>
-          )}
-
-          {/* Totals, with the discount typed straight into the line it affects */}
+          {/* The bill: what it adds up to, and what the wallet does to it. */}
           <div className="space-y-1 text-sm">
             <div className="flex justify-between text-ink-500">
               <span>Subtotal</span>
@@ -447,125 +428,104 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
                 value={discountText}
                 placeholder="0"
                 ariaLabel="Discount amount in rupees"
-                onChange={setDiscountText}
+                onChange={(text) => {
+                  setDiscountText(text)
+                  setTender(null)
+                }}
                 tone={preview.discountAmount > 0 ? 'ok' : 'plain'}
               />
             </div>
-            {preview.pointsValueRedeemed > 0 && (
-              <div className="flex justify-between font-semibold text-ok-600">
-                <span>Points ({preview.pointsRedeemed})</span>
-                <span className="tabular-nums">−{formatINR(preview.pointsValueRedeemed)}</span>
-              </div>
-            )}
-            <div className="flex justify-between border-t border-surface-200 pt-1.5 text-base font-bold">
-              <span>Bill</span>
+            <div
+              className={cn(
+                'flex justify-between border-t border-surface-200 pt-1.5 font-bold',
+                onWallet ? 'text-base' : 'text-lg',
+              )}
+            >
+              <span>To pay</span>
               <span className="tabular-nums">{formatINR(preview.total)}</span>
             </div>
-            {preview.pointsToEarn > 0 && (
-              <p className="text-right text-xs font-semibold text-accent-600">earns +{preview.pointsToEarn} pts</p>
+
+            {/* One tap, no typing: the wallet pays as much as it can. */}
+            {customer && held > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setUseWallet(!useWallet)
+                  setTender(null)
+                }}
+                aria-pressed={useWallet}
+                className="flex w-full items-center justify-between gap-2 rounded-xl px-1 py-0.5 text-left hover:bg-white"
+              >
+                <span className="flex items-center gap-1.5 text-ink-500">
+                  <Wallet className="size-3.5" />
+                  Wallet <span className="text-ink-300">({formatINR(held)} in it)</span>
+                </span>
+                <span
+                  className={cn(
+                    'rounded-lg px-2 py-0.5 text-[13px] font-bold tabular-nums',
+                    useWallet ? 'bg-ok-100 text-ok-600' : 'bg-surface-200 text-ink-500',
+                  )}
+                >
+                  {useWallet ? `−${formatINR(walletApplied)}` : 'not used'}
+                </span>
+              </button>
             )}
 
-            {/* The guest's account, as bill lines: what comes off an advance,
-                what goes on the tab, what they leave behind for next time. */}
-            {customer && (
-              <>
-                {advance > 0 && (
-                  <div className="flex items-center justify-between">
-                    <label htmlFor="bill-advance" className="text-ink-500">
-                      From advance <span className="text-ink-300">({formatINR(advance)} held)</span>
-                    </label>
-                    <AmountInput
-                      id="bill-advance"
-                      value={walletText ?? plainAmount(plan.walletApplied)}
-                      ariaLabel="Amount taken from the guest's advance"
-                      onChange={setWalletText}
-                      onBlur={() => setWalletText(plainAmount(plan.walletApplied))}
-                      tone={plan.walletApplied > 0 ? 'ok' : 'plain'}
-                    />
-                  </div>
-                )}
-                {settings.accounts.allowPayLater && (
-                  <div className="flex items-center justify-between">
-                    <label htmlFor="bill-later" className="text-ink-500">
-                      Pay later
-                    </label>
-                    <span className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setLaterText(plainAmount(round2(preview.total - plan.walletApplied)))
-                        }
-                        className="h-7 rounded-full bg-white px-2.5 text-[11px] font-bold text-ink-700 shadow-card ring-1 ring-surface-200 hover:text-ink-900"
-                      >
-                        Whole bill
-                      </button>
-                      <AmountInput
-                        id="bill-later"
-                        value={laterText}
-                        placeholder="0"
-                        ariaLabel="Amount left on the guest's account"
-                        onChange={setLaterText}
-                        onBlur={() => setLaterText(plan.creditAmount > 0 ? plainAmount(plan.creditAmount) : '')}
-                        tone={plan.creditAmount > 0 ? 'warn' : 'plain'}
-                      />
-                    </span>
-                  </div>
-                )}
-                <div className="flex items-center justify-between">
-                  <label htmlFor="bill-extra" className="text-ink-500">
-                    Extra for next time
-                  </label>
-                  <span className="flex items-center gap-1.5">
-                    {plan.owedBefore > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setExtraText(plainAmount(plan.owedBefore))}
-                        className="h-7 rounded-full bg-danger-100 px-2.5 text-[11px] font-bold text-danger-600 hover:brightness-95"
-                      >
-                        Clear {formatINR(plan.owedBefore)} owed
-                      </button>
-                    )}
-                    <AmountInput
-                      id="bill-extra"
-                      value={extraText}
-                      placeholder="0"
-                      ariaLabel="Extra amount kept as advance"
-                      onChange={setExtraText}
-                      onBlur={() => setExtraText(plan.walletTopUp > 0 ? plainAmount(plan.walletTopUp) : '')}
-                      tone={plan.walletTopUp > 0 ? 'ok' : 'plain'}
-                      sign="+"
-                    />
-                  </span>
-                </div>
-              </>
-            )}
-
-            <div className="flex justify-between border-t border-surface-200 pt-1.5 text-lg font-bold">
-              <span>Taking now</span>
-              <span className="tabular-nums">{formatINR(plan.tenderTarget)}</span>
-            </div>
-            {plan.creditAmount > 0 && (
-              <p className="text-right text-xs font-semibold text-warn-600">
-                {formatINR(plan.creditAmount)} goes on {customer?.name ?? 'the guest'}'s account
-              </p>
+            {onWallet && (
+              <div className="flex justify-between border-t border-surface-200 pt-1.5 text-lg font-bold">
+                <span>Taking now</span>
+                <span className="tabular-nums">{formatINR(plan.tenderTarget)}</span>
+              </div>
             )}
           </div>
 
-          {/* Payment: two legs that always add up to the total */}
+          {/* Payment */}
           <div>
-            <div className="mb-1.5 flex items-center justify-between">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
               <span className="text-xs font-bold uppercase tracking-wide text-ink-500">Payment</span>
               <div className="flex gap-1">
                 {PAYMENT_METHODS.map((m) => (
                   <button
                     key={m}
                     type="button"
-                    onClick={() => setEntry({ method: m, text: plainAmount(preview.total) })}
+                    onClick={() => allIn(m)}
                     className="h-7 rounded-full bg-white px-3 text-[11px] font-bold text-ink-700 shadow-card ring-1 ring-surface-200 transition-all hover:text-ink-900 hover:shadow-lift"
                   >
                     All {PAYMENT_METHOD_META[m].label}
                   </button>
                 ))}
+                {customer && plan.owedBefore > 0 && !payLater && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setTender({ cash: plainAmount(round2(due + plan.owedBefore)), upi: '0' })
+                    }
+                    className="h-7 rounded-full bg-danger-100 px-3 text-[11px] font-bold text-danger-600 transition-all hover:brightness-95"
+                  >
+                    + Owed {formatINR(plan.owedBefore)}
+                  </button>
+                )}
+                {customer && settings.wallet.allowPayLater && (
+                  <button
+                    type="button"
+                    aria-pressed={payLater}
+                    onClick={() => {
+                      const next = !payLater
+                      setPayLater(next)
+                      // Turning it on means nothing is being handed over yet,
+                      // which is the usual reason for reaching for it.
+                      setTender(next ? { cash: '0', upi: '0' } : null)
+                    }}
+                    className={cn(
+                      'h-7 rounded-full px-3 text-[11px] font-bold transition-all',
+                      payLater
+                        ? 'bg-ink-900 text-white shadow-card'
+                        : 'bg-white text-ink-700 shadow-card ring-1 ring-surface-200 hover:text-ink-900 hover:shadow-lift',
+                    )}
+                  >
+                    Pay later
+                  </button>
+                )}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -590,10 +550,10 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
                         type="text"
                         inputMode="decimal"
                         aria-label={`${PAYMENT_METHOD_META[m].label} amount`}
-                        value={boxValue(m)}
+                        value={boxes[m]}
                         onFocus={(e) => e.currentTarget.select()}
-                        onChange={(e) => setEntry({ method: m, text: e.target.value })}
-                        onBlur={() => setEntry({ method: m, text: plainAmount(payments[m]) })}
+                        onChange={(e) => setLeg(m, e.target.value)}
+                        onBlur={() => setLeg(m, plainAmount(payments[m]))}
                         className="w-full min-w-0 bg-transparent text-base font-bold tabular-nums outline-none"
                       />
                     </span>
@@ -602,6 +562,22 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
               ))}
             </div>
           </div>
+
+          {/* Where the wallet lands, in one sentence, whichever way it moved. */}
+          {customer && onWallet && (
+            <p
+              className={cn(
+                'text-center text-xs font-bold',
+                plan.balanceAfter < 0 ? 'text-warn-600' : 'text-ok-600',
+              )}
+            >
+              {plan.balanceAfter < 0
+                ? `${customer.name} will owe ${formatINR(walletOwed(plan.balanceAfter))}`
+                : plan.balanceAfter > 0
+                  ? `${formatINR(plan.balanceAfter)} left in ${customer.name}'s wallet`
+                  : `${customer.name}'s wallet is square`}
+            </p>
+          )}
 
           <Button size="lg" className="w-full" disabled={!canSettle} onClick={settle}>
             <ReceiptIndianRupee className="size-5" />
@@ -614,7 +590,14 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
               Split as {paymentSummary(payments)}
             </p>
           )}
-          {!canSettle && rounds.length > 0 && (
+          {!addsUp && rounds.length > 0 && (
+            <p className="text-center text-xs font-semibold text-danger-600">
+              {formatINR(Math.abs(round2(due - tendered)))}{' '}
+              {tendered < due ? 'short' : 'over'} — add a guest to put it on a wallet, or fix the
+              amounts.
+            </p>
+          )}
+          {!canSettle && addsUp && rounds.length > 0 && (
             <p className="text-center text-xs font-semibold text-warn-600">
               {pendingInKitchen.length} round{pendingInKitchen.length > 1 ? 's' : ''} still with the
               kitchen — settle once everything is delivered.
@@ -640,7 +623,7 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
           onClick={() => setAskingGuest(true)}
           className="mb-3 flex w-full items-center justify-center gap-2 rounded-card border border-dashed border-surface-300 px-4 py-2.5 text-[13px] font-semibold text-ink-500 transition-colors hover:border-accent-500 hover:text-accent-600"
         >
-          <UserPlus className="size-4" /> Add a guest — needed to pay later or use an advance
+          <UserPlus className="size-4" /> Add a guest — needed for pay later and wallets
         </button>
       )}
 
@@ -653,9 +636,9 @@ function TableBillSheet({ tableId, onClose }: { tableId: string | null; onClose:
         onPick={(picked) => {
           setAskingGuest(false)
           if (table) orderService.setSittingCustomer(table.id, picked?.id ?? null)
-          setWalletText(null)
-          setLaterText('')
-          setExtraText('')
+          setUseWallet(true)
+          setPayLater(false)
+          setTender(null)
         }}
       />
 

@@ -231,19 +231,14 @@ export interface Bill {
   subtotal: number
   /** Flat rupees off the bill; never more than the subtotal. */
   discountAmount: number
-  /** Loyalty points applied to this bill and their rupee value. */
-  pointsRedeemed: number
-  pointsValueRedeemed: number
-  /** Points earned by this bill (0 when loyalty is off or no phone). */
-  pointsEarned: number
   total: number
   /** Cash and UPI that actually changed hands at the counter. */
   payments: BillPayments
-  /** Paid out of the guest's advance balance. */
+  /** Paid out of the guest's wallet. */
   walletApplied: number
-  /** Left on the guest's account to pay next time. */
+  /** Left on the guest's wallet to pay next time. */
   creditAmount: number
-  /** Handed over beyond the bill and kept as advance. */
+  /** Handed over beyond the bill and kept in the wallet. */
   walletTopUp: number
   settledAt: string
   settledByUserId: ID
@@ -267,12 +262,12 @@ export interface Customer extends Timestamps {
 /**
  * How the entry reads in history. It never changes the arithmetic — the
  * balance is always the signed sum of `amount`.
- *   topup      guest left money with us (or paid over a bill)
- *   spend      that money paid for a bill
+ *   topup      guest put money into the wallet (or paid over a bill)
+ *   spend      wallet money paid for a bill
  *   credit     a bill went out unpaid
  *   repayment  guest cleared what they owed
  *   adjustment manager correction, note required
- *   refund     advance handed back to the guest
+ *   refund     wallet money handed back to the guest
  */
 export const WALLET_ENTRY_KINDS = [
   'topup',
@@ -285,11 +280,11 @@ export const WALLET_ENTRY_KINDS = [
 export type WalletEntryKind = (typeof WALLET_ENTRY_KINDS)[number]
 
 /**
- * One movement on a guest's account, signed from the cafe's side:
- *   positive -> the cafe is holding the guest's money (advance)
+ * One movement in a guest's wallet, signed from the cafe's side:
+ *   positive -> the cafe is holding the guest's money
  *   negative -> the guest owes the cafe
- * The balance is the running sum, so a single ledger covers both directions
- * and nothing has to be zeroed when a guest swings from owing to in credit.
+ * The balance is the running sum, so one wallet covers both directions and
+ * nothing has to be zeroed when a guest swings from owing to in credit.
  */
 export interface WalletEntry {
   id: ID
@@ -337,17 +332,10 @@ export interface CafeSettings {
   currency: 'INR'
   /** Open the guest lookup when a table's first round is started. */
   askCustomerInfo: boolean
-  /** Customer accounts: advances held and bills left to pay later. */
-  accounts: {
+  /** Customer wallets: money held for a guest, and bills paid later. */
+  wallet: {
     /** Allow a bill to go out partly or fully unpaid. Needs a mobile number. */
     allowPayLater: boolean
-  }
-  loyalty: {
-    enabled: boolean
-    /** Points earned per ₹100 of the final bill. */
-    pointsPer100: number
-    /** Rupee value of one point at redemption. */
-    rupeesPerPoint: number
   }
   /** Audible alert on the kitchen display. */
   sound: {

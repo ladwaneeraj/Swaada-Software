@@ -1,12 +1,12 @@
-import { ArrowDownLeft, ArrowUpRight, Phone, Scale, Sparkles, UserPlus, Wallet } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, Phone, Scale, UserPlus, Wallet } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useToasts } from '@/components/toast'
 import { Badge, Button, Field, Input, Modal, Segmented, Textarea } from '@/components/ui'
 import { PAYMENT_METHOD_META, WALLET_ENTRY_META } from '@/lib/statusMeta'
 import { cn, dateTimeLabel, formatINR, parseAmount } from '@/lib/utils'
 import {
-  advanceHeld,
-  amountOwed,
+  walletHeld,
+  walletOwed,
   customerAccounts,
   customerService,
   isCompletePhone,
@@ -49,15 +49,15 @@ export function useAccount(customerId: string | undefined): CustomerAccount | un
 /**
  * One badge for both directions of the same number: red when the guest owes
  * the cafe, green when the cafe is holding their money. Nothing at all at
- * zero, so a settled account adds no noise to a busy screen.
+ * zero, so a square wallet adds no noise to a busy screen.
  */
 export function BalancePill({ balance, className }: { balance: number; className?: string }) {
-  const owed = amountOwed(balance)
-  const held = advanceHeld(balance)
+  const owed = walletOwed(balance)
+  const held = walletHeld(balance)
   if (owed === 0 && held === 0) return null
   return (
     <Badge tone={owed > 0 ? 'danger' : 'ok'} dot className={className}>
-      {owed > 0 ? `Owes ${formatINR(owed)}` : `Advance ${formatINR(held)}`}
+      {owed > 0 ? `Owes ${formatINR(owed)}` : `Wallet ${formatINR(held)}`}
     </Badge>
   )
 }
@@ -65,7 +65,6 @@ export function BalancePill({ balance, className }: { balance: number; className
 /* ----------------------------- Account summary --------------------------- */
 
 export function AccountSummary({ account }: { account: CustomerAccount }) {
-  const loyalty = useAppStore((s) => s.db.settings.loyalty)
   return (
     <div className="rounded-card bg-surface-100 p-3.5">
       <div className="flex items-start justify-between gap-3">
@@ -85,11 +84,6 @@ export function AccountSummary({ account }: { account: CustomerAccount }) {
           <b className="text-ink-900 tabular-nums">{formatINR(account.totalSpent)}</b> spent
         </span>
         {account.lastVisitAt && <span>last {dateTimeLabel(account.lastVisitAt)}</span>}
-        {loyalty.enabled && account.pointsBalance > 0 && (
-          <span className="flex items-center gap-1 font-semibold text-accent-600">
-            <Sparkles className="size-3" /> {account.pointsBalance} pts
-          </span>
-        )}
       </div>
       {account.customer.note && (
         <p className="mt-2 text-xs italic text-ink-500">“{account.customer.note}”</p>
@@ -282,19 +276,19 @@ export type MoneyMode = 'take' | 'return' | 'adjust'
 
 const MONEY_COPY: Record<MoneyMode, { title: string; action: string; hint: string }> = {
   take: {
-    title: 'Take money',
-    action: 'Record payment',
-    hint: 'Clears what the guest owes first; anything beyond that stays as advance.',
+    title: 'Add money',
+    action: 'Add to wallet',
+    hint: 'Clears what the guest owes first; anything beyond that stays in their wallet.',
   },
   return: {
-    title: 'Return money',
+    title: 'Give money back',
     action: 'Record return',
-    hint: 'Hands an advance back. Never more than the cafe is holding.',
+    hint: 'Hands wallet money back. Never more than the cafe is holding.',
   },
   adjust: {
-    title: 'Adjust balance',
-    action: 'Save adjustment',
-    hint: 'Writing off a due or fixing a mistake. The reason is kept on the account.',
+    title: 'Fix the balance',
+    action: 'Save correction',
+    hint: 'Writing off what someone owes, or fixing a mistake. The reason is kept.',
   },
 }
 
@@ -320,8 +314,8 @@ export function MoneySheet({
 
   const copy = MONEY_COPY[mode]
   const amount = parseAmount(amountText)
-  const held = account ? advanceHeld(account.balance) : 0
-  const owed = account ? amountOwed(account.balance) : 0
+  const held = account ? walletHeld(account.balance) : 0
+  const owed = account ? walletOwed(account.balance) : 0
   const capped = mode === 'return' ? Math.min(amount, held) : amount
   const valid = capped > 0 && (mode !== 'adjust' || note.trim().length > 0)
 
@@ -372,7 +366,7 @@ export function MoneySheet({
     >
       {account && (
         <div className="mb-3 flex items-center justify-between gap-3 rounded-card bg-surface-100 px-3.5 py-2.5">
-          <span className="text-[13px] font-semibold text-ink-500">Account now</span>
+          <span className="text-[13px] font-semibold text-ink-500">Wallet now</span>
           <BalancePill balance={account.balance} />
         </div>
       )}
@@ -394,7 +388,7 @@ export function MoneySheet({
           label="Amount"
           hint={
             mode === 'return' && held > 0
-              ? `Advance held: ${formatINR(held)}`
+              ? `In the wallet: ${formatINR(held)}`
               : mode === 'take' && owed > 0
                 ? `Owes ${formatINR(owed)} right now`
                 : undefined
@@ -425,7 +419,7 @@ export function MoneySheet({
           <Textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder={mode === 'adjust' ? 'e.g. Wrote off ₹40 rounding on bill #512' : 'e.g. Advance for Sunday booking'}
+            placeholder={mode === 'adjust' ? 'e.g. Wrote off ₹40 rounding on bill #512' : 'e.g. Paid ahead for Sunday'}
             aria-label={mode === 'adjust' ? 'Reason for the adjustment' : 'Note'}
           />
         </Field>
@@ -449,13 +443,13 @@ export function AccountActions({
   return (
     <div className="flex flex-wrap gap-2">
       <Button size="sm" variant="secondary" onClick={onTake}>
-        <ArrowDownLeft className="size-4" /> Take money
+        <ArrowDownLeft className="size-4" /> Add money
       </Button>
       <Button size="sm" variant="secondary" onClick={onReturn} disabled={held <= 0}>
-        <ArrowUpRight className="size-4" /> Return money
+        <ArrowUpRight className="size-4" /> Give back
       </Button>
       <Button size="sm" variant="secondary" onClick={onAdjust}>
-        <Scale className="size-4" /> Adjust
+        <Scale className="size-4" /> Fix balance
       </Button>
     </div>
   )

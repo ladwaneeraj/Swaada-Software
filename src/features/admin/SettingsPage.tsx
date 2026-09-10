@@ -19,7 +19,7 @@ function volumeKey(volume: number): VolumeKey {
   return 'loud'
 }
 
-/** Café-level configuration: identity, loyalty, stations, demo data. */
+/** Café-level configuration: identity, wallets, alerts, stations, demo data. */
 export function SettingsPage() {
   const settings = useAppStore((s) => s.db.settings)
   const sound = useAppStore((s) => s.db.settings.sound)
@@ -54,10 +54,10 @@ export function SettingsPage() {
       </Card>
 
       <Card className="mb-5 p-5">
-        <h2 className="mb-1 text-base font-bold">Customer accounts</h2>
+        <h2 className="mb-1 text-base font-bold">Customer wallets</h2>
         <p className="mb-4 text-sm text-ink-500">
-          A guest is identified by their mobile number. Typing it brings back their name, what they
-          have spent, and whether the café is holding their money or they owe some.
+          A guest is known by their mobile number, and each one has a wallet. It holds money they
+          have paid ahead, or what they still owe. Typing the number brings all of it back.
         </p>
 
         <div className="space-y-3">
@@ -83,64 +83,19 @@ export function SettingsPage() {
             <div>
               <p className="text-sm font-semibold">Allow pay later</p>
               <p className="text-xs text-ink-500">
-                Lets a bill go out partly or fully unpaid, on the account of a guest with a mobile
+                Lets a bill go out partly or fully unpaid, on the wallet of a guest with a mobile
                 number. Turn this off and every bill must be settled at the table.
               </p>
             </div>
             <Toggle
-              checked={settings.accounts.allowPayLater}
+              checked={settings.wallet.allowPayLater}
               onChange={(allowPayLater) => {
-                settingsService.update({ accounts: { ...settings.accounts, allowPayLater } })
-                pushToast(allowPayLater ? 'Bills can be left on a guest account' : 'Every bill must be settled at the table', 'ok')
+                settingsService.update({ wallet: { ...settings.wallet, allowPayLater } })
+                pushToast(allowPayLater ? 'Bills can be left on a wallet' : 'Every bill must be settled at the table', 'ok')
               }}
               label="Allow pay later"
             />
           </div>
-        </div>
-      </Card>
-
-      <Card className="mb-5 p-5">
-        <div className="mb-1 flex items-center justify-between gap-4">
-          <h2 className="text-base font-bold">Loyalty points</h2>
-          <Toggle
-            checked={settings.loyalty.enabled}
-            onChange={(enabled) => {
-              settingsService.update({ loyalty: { ...settings.loyalty, enabled } })
-              pushToast(enabled ? 'Loyalty points on' : 'Loyalty points off', 'ok')
-            }}
-            label="Loyalty enabled"
-          />
-        </div>
-        <p className="mb-4 text-sm text-ink-500">
-          Guests with a mobile number earn points on every settled bill and can redeem them as a
-          discount at payment.
-        </p>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Points per ₹100">
-            <Input
-              type="number"
-              min={0}
-              value={settings.loyalty.pointsPer100}
-              onChange={(e) =>
-                settingsService.update({
-                  loyalty: { ...settings.loyalty, pointsPer100: Math.max(0, Number(e.target.value) || 0) },
-                })
-              }
-            />
-          </Field>
-          <Field label="₹ value per point">
-            <Input
-              type="number"
-              min={0}
-              step="0.5"
-              value={settings.loyalty.rupeesPerPoint}
-              onChange={(e) =>
-                settingsService.update({
-                  loyalty: { ...settings.loyalty, rupeesPerPoint: Math.max(0, Number(e.target.value) || 0) },
-                })
-              }
-            />
-          </Field>
         </div>
       </Card>
 

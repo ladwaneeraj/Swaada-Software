@@ -39,12 +39,12 @@ export const ORDER_STATUS_META: Record<OrderStatus, StatusMeta> = {
 
 /** How one line of a guest's account reads. Arithmetic lives in the ledger. */
 export const WALLET_ENTRY_META: Record<WalletEntryKind, { label: string; tone: Tone }> = {
-  topup: { label: 'Money added', tone: 'ok' },
-  spend: { label: 'Paid from advance', tone: 'neutral' },
+  topup: { label: 'Money added to wallet', tone: 'ok' },
+  spend: { label: 'Paid from wallet', tone: 'neutral' },
   credit: { label: 'Left unpaid', tone: 'danger' },
   repayment: { label: 'Dues cleared', tone: 'ok' },
   adjustment: { label: 'Adjusted', tone: 'warn' },
-  refund: { label: 'Money returned', tone: 'neutral' },
+  refund: { label: 'Money given back', tone: 'neutral' },
 }
 
 export const PAYMENT_METHOD_META: Record<PaymentMethod, { label: string; icon: string }> = {

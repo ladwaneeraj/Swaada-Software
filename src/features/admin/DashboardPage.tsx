@@ -123,7 +123,7 @@ export function DashboardPage() {
       </div>
 
       {/* Day-end money. Sales and collections differ by exactly what was
-          eaten on credit, paid from an old advance, or left for next time. */}
+          eaten on credit, paid from a wallet, or left for next time. */}
       {(money.sales > 0 || money.collected > 0) && (
         <Card className="mb-6 p-5">
           <div className="mb-3 flex items-center justify-between">
@@ -137,13 +137,13 @@ export function DashboardPage() {
             <MoneyLine label="Cash" value={money.cash} />
             <MoneyLine label="UPI" value={money.upi} />
             <MoneyLine label="Collected" value={money.collected} strong />
-            <MoneyLine label="Paid from advance" value={money.fromAdvance} />
+            <MoneyLine label="Paid from wallets" value={money.fromWallet} />
             <MoneyLine label="Left unpaid" value={money.leftUnpaid} tone={money.leftUnpaid > 0 ? 'danger' : undefined} />
           </div>
-          {money.advanceTaken > 0 && (
+          {money.walletTopUps > 0 && (
             <p className="mt-3 text-xs text-ink-500">
-              {formatINR(money.advanceTaken)} taken as advance for later visits — collected today, not
-              earned today.
+              {formatINR(money.walletTopUps)} of that went into customer wallets for later visits.
+              Collected today, not earned today.
             </p>
           )}
         </Card>

@@ -465,13 +465,8 @@ export function seedSnapshot(): DBSnapshot {
       cafeName: 'Swaada Café',
       currency: 'INR' as const,
       askCustomerInfo: true,
-      accounts: {
+      wallet: {
         allowPayLater: true,
-      },
-      loyalty: {
-        enabled: true,
-        pointsPer100: 5,
-        rupeesPerPoint: 1,
       },
       sound: {
         newOrderAlert: true,

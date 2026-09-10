@@ -1,4 +1,4 @@
-import { ChevronDown, Phone, Sparkles, UserPlus } from 'lucide-react'
+import { ChevronDown, Phone, UserPlus } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { PageHeader } from '@/components/layout/AdminLayout'
 import {
@@ -13,7 +13,7 @@ import {
 import { useToasts } from '@/components/toast'
 import { Badge, Button, Card, EmptyState, Input, Segmented, Stat } from '@/components/ui'
 import { paymentSummary } from '@/lib/statusMeta'
-import { advanceHeld, amountOwed, billsForCustomer } from '@/services'
+import { billsForCustomer, walletHeld, walletOwed } from '@/services'
 import { cn, dateTimeLabel, formatINR } from '@/lib/utils'
 import { useAppStore } from '@/store/useAppStore'
 import type { CustomerAccount } from '@/services'
@@ -26,7 +26,6 @@ type Filter = 'all' | 'owing' | 'credit'
  */
 export function CustomersPage() {
   const bills = useAppStore((s) => s.db.bills)
-  const loyalty = useAppStore((s) => s.db.settings.loyalty)
   const pushToast = useToasts((s) => s.push)
   const accounts = useAccounts()
 
@@ -38,8 +37,8 @@ export function CustomersPage() {
 
   const totals = useMemo(
     () => ({
-      owed: accounts.reduce((sum, a) => sum + amountOwed(a.balance), 0),
-      held: accounts.reduce((sum, a) => sum + advanceHeld(a.balance), 0),
+      owed: accounts.reduce((sum, a) => sum + walletOwed(a.balance), 0),
+      held: accounts.reduce((sum, a) => sum + walletHeld(a.balance), 0),
     }),
     [accounts],
   )
@@ -55,7 +54,7 @@ export function CustomersPage() {
     <div className="max-w-4xl">
       <PageHeader
         title="Customers"
-        sub="Everyone who has given a mobile number, with what they have spent and where their account stands"
+        sub="Everyone who has given a mobile number, with what they have spent and what is in their wallet"
         actions={
           <Button onClick={() => setAdding(true)}>
             <UserPlus className="size-4" /> Add guest
@@ -66,7 +65,7 @@ export function CustomersPage() {
       <div className="mb-5 grid grid-cols-3 gap-3">
         <Stat label="Guests" value={String(accounts.length)} />
         <Stat label="Owed to the café" value={formatINR(totals.owed)} tone={totals.owed > 0 ? 'danger' : 'neutral'} />
-        <Stat label="Advances held" value={formatINR(totals.held)} tone={totals.held > 0 ? 'ok' : 'neutral'} />
+        <Stat label="Money in wallets" value={formatINR(totals.held)} tone={totals.held > 0 ? 'ok' : 'neutral'} />
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -130,25 +129,20 @@ export function CustomersPage() {
                     </p>
                   </div>
                   <BalancePill balance={account.balance} className="shrink-0" />
-                  {loyalty.enabled && account.pointsBalance > 0 && (
-                    <Badge tone="accent" className="hidden shrink-0 md:inline-flex">
-                      <Sparkles className="size-3" /> {account.pointsBalance} pts
-                    </Badge>
-                  )}
                   <ChevronDown className={cn('size-4 shrink-0 text-ink-300 transition-transform', open && 'rotate-180')} />
                 </button>
 
                 {open && (
                   <div className="space-y-4 border-t border-surface-100 px-5 py-4">
                     <AccountActions
-                      held={advanceHeld(account.balance)}
+                      held={walletHeld(account.balance)}
                       onTake={() => setMoney({ account, mode: 'take' })}
                       onReturn={() => setMoney({ account, mode: 'return' })}
                       onAdjust={() => setMoney({ account, mode: 'adjust' })}
                     />
 
                     <section>
-                      <h3 className="mb-1 text-[11px] font-bold uppercase tracking-wider text-ink-500">Account</h3>
+                      <h3 className="mb-1 text-[11px] font-bold uppercase tracking-wider text-ink-500">Wallet</h3>
                       <WalletHistory customer={customer} />
                     </section>
 
@@ -168,11 +162,9 @@ export function CustomersPage() {
                                 <p className="text-xs text-ink-500">
                                   {b.orderNumbers.length} round{b.orderNumbers.length > 1 ? 's' : ''}
                                   {b.discountAmount > 0 && ` · discount ${formatINR(b.discountAmount)}`}
-                                  {b.walletApplied > 0 && ` · ${formatINR(b.walletApplied)} from advance`}
-                                  {b.creditAmount > 0 && ` · ${formatINR(b.creditAmount)} on account`}
-                                  {b.walletTopUp > 0 && ` · ${formatINR(b.walletTopUp)} kept as advance`}
-                                  {b.pointsRedeemed > 0 && ` · redeemed ${b.pointsRedeemed} pts`}
-                                  {b.pointsEarned > 0 && ` · earned +${b.pointsEarned} pts`}
+                                  {b.walletApplied > 0 && ` · ${formatINR(b.walletApplied)} from wallet`}
+                                  {b.creditAmount > 0 && ` · ${formatINR(b.creditAmount)} left on wallet`}
+                                  {b.walletTopUp > 0 && ` · ${formatINR(b.walletTopUp)} into wallet`}
                                 </p>
                               </div>
                               <div className="flex shrink-0 items-center gap-2">

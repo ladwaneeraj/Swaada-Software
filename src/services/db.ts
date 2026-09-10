@@ -49,9 +49,8 @@ function withDefaults(parsed: DBSnapshot): DBSnapshot {
     settings: {
       ...DEFAULT_SETTINGS,
       ...stored,
-      loyalty: { ...DEFAULT_SETTINGS.loyalty, ...stored.loyalty },
       sound: { ...DEFAULT_SETTINGS.sound, ...stored.sound },
-      accounts: { ...DEFAULT_SETTINGS.accounts, ...stored.accounts },
+      wallet: { ...DEFAULT_SETTINGS.wallet, ...stored.wallet },
     },
   }
 }
