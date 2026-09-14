@@ -6,7 +6,7 @@ import { OrderItemLine } from '@/components/order/OrderBits'
 import { Badge, Card, EmptyState, Input, Segmented, Select } from '@/components/ui'
 import { billOutcome, paymentSummary } from '@/lib/statusMeta'
 import { cn, dateTimeLabel, formatINR } from '@/lib/utils'
-import { billBreakdown, billForOrder, isActiveOrder, walletBalance, walletOwed } from '@/services'
+import { billBreakdown, isActiveOrder, walletBalance, walletOwed } from '@/services'
 import { HISTORY_RANGES, useHistory, type HistoryRangeKey } from '@/lib/useHistory'
 import type { Bill, Order } from '@/types'
 
@@ -67,9 +67,17 @@ function MoneyLine({
  * are different numbers for good reasons, so the screen now shows the steps
  * between them instead of printing the two side by side.
  */
-function BillMoney({ bill, order, owesNow }: { bill: Bill; order: Order; owesNow: number }) {
+/**
+ * The money on a bill, shown ONCE under the bill it belongs to.
+ *
+ * This used to be rendered under every round the bill covered, with a note
+ * explaining that the figures were for the whole bill rather than that
+ * round. The note was correct and nobody read it: a two-round sitting looked
+ * like two bills for the same money. Grouping the screen by bill removed the
+ * need for the note and the confusion with it.
+ */
+function BillMoney({ bill, owesNow }: { bill: Bill; owesNow: number }) {
   const m = billBreakdown(bill)
-  const otherRounds = bill.orderNumbers.filter((n) => n !== order.orderNumber)
 
   return (
     <div className="mt-3 rounded-xl border border-surface-200 bg-surface-50 px-3 py-2">
@@ -79,13 +87,6 @@ function BillMoney({ bill, order, owesNow }: { bill: Bill; order: Order; owesNow
           {dateTimeLabel(bill.settledAt)} · {bill.settledByName}
         </span>
       </p>
-
-      {otherRounds.length > 0 && (
-        <p className="mb-1 text-[11px] text-ink-500">
-          Covers this round with {otherRounds.map((n) => `#${n}`).join(', ')} — the money below is
-          for the whole bill, not this round alone.
-        </p>
-      )}
 
       <div className="divide-y divide-surface-200">
         <MoneyLine label="Bill total" amount={m.total} strong />
@@ -149,37 +150,72 @@ export function HistoryPage() {
   const [query, setQuery] = useState(() => searchParams.get('q') ?? '')
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  const rows = useMemo(() => {
+  /**
+   * One entry per BILL, with the rounds it covered inside it.
+   *
+   * The screen used to be one entry per round, repeating the bill under each
+   * one. A table that ordered twice therefore showed the same ₹264 bill
+   * twice, and read as two bills for one sitting — which is exactly what a
+   * café manager would panic about. A bill is what the guest paid, so a bill
+   * is what a row is.
+   *
+   * Rounds with no bill (cancelled, or closed without one) stand on their
+   * own, because there is nothing to group them under.
+   */
+  const entries = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return orders
-      .filter((o) => !isActiveOrder(o))
-      .map((o) => ({ order: o, bill: billForOrder(bills, o) }))
-      .filter(({ order, bill }) => {
+    const billById = new Map(bills.map((b) => [b.id, b]))
+
+    // Group by billId; a round without one gets a key of its own.
+    const groups = new Map<string, Order[]>()
+    for (const order of orders) {
+      if (isActiveOrder(order)) continue
+      const key = order.billId ?? `round:${order.id}`
+      groups.set(key, [...(groups.get(key) ?? []), order])
+    }
+
+    return [...groups.entries()]
+      .map(([key, grouped]) => {
+        const rounds = [...grouped].sort((a, b) => a.placedAt.localeCompare(b.placedAt))
+        const bill = key.startsWith('round:') ? undefined : billById.get(key)
+        const first = rounds[0]
+        return {
+          key,
+          bill,
+          rounds,
+          // A bill's own total, which is NOT the sum of its rounds once a
+          // discount is involved. Falling back to the round keeps a
+          // bill-less entry honest rather than showing zero.
+          total: bill ? bill.total : rounds.reduce((sum, o) => sum + o.total, 0),
+          at: bill?.settledAt ?? rounds[rounds.length - 1]?.placedAt ?? '',
+          tableName: bill?.tableName ?? first?.tableName ?? '',
+          customerName: bill?.customerName ?? first?.customerName,
+        }
+      })
+      .filter((entry) => {
         if (filter === 'all') return true
-        if (filter === 'cancelled') return order.status === 'cancelled'
-        if (order.status !== 'settled') return false
-        const owing = (bill?.creditAmount ?? 0) > 0.005
+        if (filter === 'cancelled') return entry.rounds.every((o) => o.status === 'cancelled')
+        if (!entry.bill) return false
+        const owing = entry.bill.creditAmount > 0.005
         return filter === 'owing' ? owing : !owing
       })
-      .filter(({ order, bill }) => {
+      .filter((entry) => {
         if (!q) return true
         return (
-          String(order.orderNumber).includes(q) ||
-          (bill ? String(bill.billNumber).includes(q) : false) ||
-          order.tableName.toLowerCase().includes(q) ||
-          (order.customerName ?? '').toLowerCase().includes(q) ||
-          (order.customerPhone ?? '').includes(q) ||
-          order.items.some((i) => i.name.toLowerCase().includes(q))
+          (entry.bill ? String(entry.bill.billNumber).includes(q) : false) ||
+          entry.tableName.toLowerCase().includes(q) ||
+          (entry.customerName ?? '').toLowerCase().includes(q) ||
+          entry.rounds.some(
+            (o) =>
+              String(o.orderNumber).includes(q) ||
+              (o.customerPhone ?? '').includes(q) ||
+              o.items.some((i) => i.name.toLowerCase().includes(q)),
+          )
         )
       })
-      .sort((a, b) => b.order.placedAt.localeCompare(a.order.placedAt))
+      .sort((a, b) => b.at.localeCompare(a.at))
   }, [orders, bills, filter, query])
 
-  /**
-   * Header figures are about the ROUNDS listed, and say so. Cash taken is a
-   * property of bills, not rounds, so it deliberately is not summed here —
-   * that number lives on Analytics, where it is counted once per bill.
-   */
   /**
    * What these bills PUT on a guest's account within the range on screen —
    * deliberately not "what they owe today". A balance is the sum of a
@@ -189,24 +225,21 @@ export function HistoryPage() {
   const owedInRange = (customerId?: string) =>
     customerId ? walletOwed(walletBalance(walletEntries, customerId)) : 0
 
-  const closed = rows.filter((r) => r.order.status === 'settled')
-  const roundValue = closed.reduce((s, r) => s + r.order.total, 0)
-  // Counted per bill, so a bill covering three rounds is not counted thrice.
-  const owedBills = new Map<string, number>()
-  closed.forEach(({ bill }) => {
-    if (bill && bill.creditAmount > 0.005) owedBills.set(bill.id, bill.creditAmount)
-  })
+  // Counted per bill, which is now also how the list is grouped, so the
+  // header and the rows can no longer disagree about what a sitting is.
+  const settled = entries.filter((e) => e.bill)
+  const billed = settled.reduce((sum, e) => sum + (e.bill?.total ?? 0), 0)
   // What these bills PUT on accounts. Not what is outstanding today — some of
   // it has since been paid, and saying otherwise is the same mistake this
   // screen was making with cash and UPI. Customers holds the live figure.
-  const putOnAccounts = [...owedBills.values()].reduce((s, n) => s + n, 0)
+  const putOnAccounts = settled.reduce((sum, e) => sum + (e.bill?.creditAmount ?? 0), 0)
 
   return (
     <div>
       <PageHeader
         title="Order history"
         sub={
-          `${rows.length} round${rows.length === 1 ? '' : 's'} · ${formatINR(roundValue)} across closed rounds` +
+          `${settled.length} bill${settled.length === 1 ? '' : 's'} · ${formatINR(billed)} billed` +
           (putOnAccounts > 0 ? ` · ${formatINR(putOnAccounts)} went on guest accounts` : '')
         }
       />
@@ -258,7 +291,7 @@ export function HistoryPage() {
 
       {loading ? (
         <EmptyState icon="⏳" title="Loading this period" hint="Fetching rounds and bills…" />
-      ) : rows.length === 0 ? (
+      ) : entries.length === 0 ? (
         <EmptyState
           icon="🗂"
           title="No orders here yet"
@@ -266,47 +299,50 @@ export function HistoryPage() {
         />
       ) : (
         <div className="space-y-2">
-          {rows.map(({ order, bill }) => {
-            const open = expandedId === order.id
+          {entries.map((entry) => {
+            const { bill, rounds } = entry
+            const open = expandedId === entry.key
+            const first = rounds[0]
             const outcome = bill
               ? billOutcome(bill)
-              : order.status === 'cancelled'
+              : rounds.every((o) => o.status === 'cancelled')
                 ? { label: 'Cancelled' as const, tone: 'danger' as const }
                 : { label: 'Closed' as const, tone: 'neutral' as const }
-            // The split is only shown on the row when this bill covers this
-            // round and nothing else. Otherwise it reads as the round's
-            // payment when it is the whole bill's, which is what made the
-            // old screen look like it was calculating wrongly.
-            const splitOnRow =
-              bill && bill.orderIds.length === 1 && (bill.payments.cash > 0 || bill.payments.upi > 0)
+            const itemSummary = rounds
+              .flatMap((o) => o.items.filter((i) => i.status !== 'cancelled'))
+              .map((i) => `${i.quantity}× ${i.name}`)
+              .join(', ')
 
             return (
-              <Card key={order.id} className="overflow-hidden">
+              <Card key={entry.key} className="overflow-hidden">
                 <button
                   type="button"
-                  onClick={() => setExpandedId(open ? null : order.id)}
+                  onClick={() => setExpandedId(open ? null : entry.key)}
                   aria-expanded={open}
                   className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-surface-50"
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-bold">
-                      #{order.orderNumber} · Table {order.tableName}
+                      {bill ? `Bill #${bill.billNumber}` : `Round #${first?.orderNumber ?? '—'}`} ·
+                      Table {entry.tableName}
                       <span className="ml-2 font-normal text-ink-500">
-                        {dateTimeLabel(order.placedAt)}
+                        {dateTimeLabel(entry.at)}
                       </span>
-                      {order.customerName && (
-                        <span className="ml-2 font-normal text-ink-500">{order.customerName}</span>
+                      {entry.customerName && (
+                        <span className="ml-2 font-normal text-ink-500">{entry.customerName}</span>
                       )}
                     </p>
                     <p className="mt-0.5 truncate text-xs text-ink-500">
-                      {order.items
-                        .filter((i) => i.status !== 'cancelled')
-                        .map((i) => `${i.quantity}× ${i.name}`)
-                        .join(', ')}
+                      {rounds.length > 1 && (
+                        <span className="font-semibold">{rounds.length} rounds · </span>
+                      )}
+                      {itemSummary}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
-                    {splitOnRow && (
+                    {/* Safe on the row now that a row IS a bill: this split
+                        belongs to exactly the total printed beside it. */}
+                    {bill && (bill.payments.cash > 0 || bill.payments.upi > 0) && (
                       <span className="hidden text-xs font-semibold tabular-nums text-ink-500 sm:inline">
                         {paymentSummary(bill.payments, 'short')}
                       </span>
@@ -315,7 +351,7 @@ export function HistoryPage() {
                       {outcome.label}
                     </Badge>
                     <span className="w-20 text-right text-sm font-bold tabular-nums">
-                      {formatINR(order.total)}
+                      {formatINR(entry.total)}
                     </span>
                     <ChevronDown
                       className={cn('size-4 text-ink-300 transition-transform', open && 'rotate-180')}
@@ -325,25 +361,58 @@ export function HistoryPage() {
 
                 {open && (
                   <div className="border-t border-surface-100 px-5 py-4">
-                    <div className="divide-y divide-surface-100">
-                      {order.items.map((item) => (
-                        <OrderItemLine
-                          key={item.id}
-                          item={item}
-                          muted={item.status === 'cancelled'}
-                        />
+                    {/* One section per round. A bill can cover several of them:
+                        the rounds are what the guest ordered, the bill is how
+                        it was paid for. Both belong on screen, nested this way
+                        round, not repeated side by side. */}
+                    <div className="space-y-4">
+                      {rounds.map((order) => (
+                        <div key={order.id}>
+                          <div className="mb-1 flex items-baseline justify-between gap-3">
+                            <p className="text-xs font-bold">
+                              Round #{order.orderNumber}
+                              <span className="ml-2 font-normal text-ink-500">
+                                {dateTimeLabel(order.placedAt)} · {order.createdByName}
+                              </span>
+                            </p>
+                            <span className="shrink-0 text-xs font-bold tabular-nums">
+                              {formatINR(order.total)}
+                            </span>
+                          </div>
+                          <div className="divide-y divide-surface-100">
+                            {order.items.map((item) => (
+                              <OrderItemLine
+                                key={item.id}
+                                item={item}
+                                muted={item.status === 'cancelled'}
+                              />
+                            ))}
+                          </div>
+                          {order.cancelledAt && (
+                            <p className="mt-1.5 text-xs text-ink-500">
+                              Cancelled {dateTimeLabel(order.cancelledAt)}
+                              {order.cancelReason && ` · ${order.cancelReason}`}
+                            </p>
+                          )}
+                        </div>
                       ))}
                     </div>
 
                     <div className="mt-3 max-w-sm">
-                      <div className="flex items-baseline justify-between gap-3 border-t border-surface-200 pt-2 text-sm font-bold">
-                        <span>Round total</span>
-                        <span className="tabular-nums">{formatINR(order.total)}</span>
-                      </div>
+                      {rounds.length > 1 && (
+                        <div className="flex items-baseline justify-between gap-3 border-t border-surface-200 pt-2 text-sm font-bold">
+                          <span>
+                            {rounds.length} rounds together
+                          </span>
+                          <span className="tabular-nums">
+                            {formatINR(rounds.reduce((sum, o) => sum + o.total, 0))}
+                          </span>
+                        </div>
+                      )}
                       {bill ? (
-                        <BillMoney bill={bill} order={order} owesNow={owedInRange(bill.customerId)} />
+                        <BillMoney bill={bill} owesNow={owedInRange(bill.customerId)} />
                       ) : (
-                        order.status === 'settled' && (
+                        rounds.some((o) => o.status === 'settled') && (
                           <p className="mt-2 text-xs text-ink-500">
                             This round was closed without a bill on record.
                           </p>
@@ -351,13 +420,12 @@ export function HistoryPage() {
                       )}
                     </div>
 
-                    <p className="mt-3 text-xs text-ink-500">
-                      Placed {dateTimeLabel(order.placedAt)} by {order.createdByName}
-                      {order.customerName && ` · guest ${order.customerName}`}
-                      {order.customerPhone && ` (${order.customerPhone})`}
-                      {order.cancelledAt && ` · cancelled ${dateTimeLabel(order.cancelledAt)}`}
-                      {order.cancelReason && ` (${order.cancelReason})`}
-                    </p>
+                    {(entry.customerName ?? first?.customerPhone) && (
+                      <p className="mt-3 text-xs text-ink-500">
+                        Guest {entry.customerName ?? 'not recorded'}
+                        {first?.customerPhone && ` (${first.customerPhone})`}
+                      </p>
+                    )}
                   </div>
                 )}
               </Card>

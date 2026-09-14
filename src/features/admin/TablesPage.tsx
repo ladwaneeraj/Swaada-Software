@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/layout/AdminLayout'
 import { CustomerSheet, GuestChip, useAccount } from '@/components/customer/CustomerBits'
-import { useToasts } from '@/components/toast'
+import { useAction, useToasts } from '@/components/toast'
 import { Badge, Button, Field, Input, Modal, Textarea, Toggle, VegMark } from '@/components/ui'
 import { FLOOR_STATE_META, ORDER_STATUS_META, PAYMENT_METHOD_META, paymentSummary } from '@/lib/statusMeta'
 import { byDisplayOrder, clamp, cn, elapsedLabel, formatINR, parseAmount, round2 } from '@/lib/utils'
@@ -356,6 +356,7 @@ function TableBillSheet({
   target: { tableId: string; groupNo: number } | null
   onClose: () => void
 }) {
+  const run = useAction()
   const tables = useAppStore((s) => s.db.tables)
   const orders = useAppStore((s) => s.db.orders)
   const settings = useAppStore((s) => s.db.settings)
@@ -780,7 +781,7 @@ function TableBillSheet({
         skipLabel={customer ? 'Remove guest' : 'No guest'}
         onPick={(picked) => {
           setAskingGuest(false)
-          if (table) orderService.setSittingCustomer(table.id, groupNo, picked?.id ?? null)
+          if (table) run(orderService.setSittingCustomer(table.id, groupNo, picked?.id ?? null))
           setWalletText(null)
           setPayLater(false)
           setTender(null)
@@ -831,7 +832,7 @@ function TableBillSheet({
               variant="danger"
               onClick={() => {
                 if (!voiding) return
-                orderService.voidDeliveredRound(voiding.id, voidReason.trim())
+                run(orderService.voidDeliveredRound(voiding.id, voidReason.trim()))
                 pushToast(`Round #${voiding.orderNumber} voided`, 'warn')
                 setVoiding(null)
                 setVoidReason('')
@@ -1170,6 +1171,7 @@ function RoundItemsEditor({ round, onClose }: { round: Order | null; onClose: ()
 /* ------------------------------ Table editor ----------------------------- */
 
 function TableEditor({ editing, onClose }: { editing: CafeTable | 'new' | null; onClose: () => void }) {
+  const run = useAction()
   const isNew = editing === 'new'
   const table = isNew || editing === null ? null : editing
 
@@ -1193,8 +1195,8 @@ function TableEditor({ editing, onClose }: { editing: CafeTable | 'new' | null; 
   const save = () => {
     const input = { name: name.trim(), zone: zone.trim() || 'Main', capacity, isActive }
     if (!input.name) return
-    if (isNew) tableService.createTable(input)
-    else if (table) tableService.updateTable(table.id, input)
+    if (isNew) run(tableService.createTable(input))
+    else if (table) run(tableService.updateTable(table.id, input))
     onClose()
   }
 
@@ -1210,7 +1212,7 @@ function TableEditor({ editing, onClose }: { editing: CafeTable | 'new' | null; 
               variant="ghost"
               className="text-danger-600"
               onClick={() => {
-                tableService.archiveTable(table.id)
+                run(tableService.archiveTable(table.id))
                 onClose()
               }}
             >

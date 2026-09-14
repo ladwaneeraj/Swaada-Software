@@ -6,6 +6,7 @@ import { useNow } from '@/lib/useNow'
 import { isKitchenActiveOrder, kitchenItems, kitchenService, orderService } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
 import type { Order, OrderItem, Station } from '@/types'
+import { useAction } from '@/components/toast'
 
 /**
  * The kitchen board, shared by the standalone Kitchen screen and the
@@ -99,6 +100,7 @@ function Ticket({
   now: number
   dark: boolean
 }) {
+  const run = useAction()
   const mins = minutesSince(order.placedAt, now)
   const urgency = mins >= 15 ? 'text-danger-600' : mins >= 8 ? 'text-warn-600' : dark ? 'text-surface-300' : 'text-ink-500'
 
@@ -154,7 +156,7 @@ function Ticket({
         {order.status === 'placed' && (
           <button
             type="button"
-            onClick={() => kitchenService.startOrder(order.id)}
+            onClick={() => run(kitchenService.startOrder(order.id))}
             className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-accent-500 text-sm font-bold uppercase tracking-wide text-white hover:bg-accent-600"
           >
             <ChefHat className="size-5" /> Start preparing
@@ -180,7 +182,7 @@ function Ticket({
                 All items done · waiting {elapsedLabel(order.readyAt, now)}
               </p>
             )}
-            <SwipeToDeliver onDeliver={() => orderService.markDelivered(order.id)} />
+            <SwipeToDeliver onDeliver={() => run(orderService.markDelivered(order.id))} />
           </div>
         )}
       </footer>
@@ -266,13 +268,14 @@ function SwipeToDeliver({ onDeliver }: { onDeliver: () => void }) {
 }
 
 function TicketItem({ order, item }: { order: Order; item: OrderItem }) {
+  const run = useAction()
   const interactive = order.status === 'preparing' && item.status !== 'cancelled'
   const ready = item.status === 'ready'
   return (
     <button
       type="button"
       disabled={!interactive}
-      onClick={() => kitchenService.setItemStatus(order.id, item.id, ready ? 'preparing' : 'ready')}
+      onClick={() => run(kitchenService.setItemStatus(order.id, item.id, ready ? 'preparing' : 'ready'))}
       aria-label={`${item.name}: mark ${ready ? 'not ready' : 'ready'}`}
       className={cn(
         'flex w-full items-start gap-3 rounded-lg px-1 py-1.5 text-left',

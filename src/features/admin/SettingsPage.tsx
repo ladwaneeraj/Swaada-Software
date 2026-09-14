@@ -1,7 +1,7 @@
 import { Volume2 } from 'lucide-react'
 import { useState } from 'react'
 import { PageHeader } from '@/components/layout/AdminLayout'
-import { useToasts } from '@/components/toast'
+import { useAction, useToasts } from '@/components/toast'
 import { Badge, Button, Card, Field, Input, Segmented, Toggle } from '@/components/ui'
 import { byDisplayOrder } from '@/lib/utils'
 import { playOrderChime } from '@/lib/sound'
@@ -22,6 +22,7 @@ function volumeKey(volume: number): VolumeKey {
 
 /** Café-level configuration: identity, wallets, alerts, stations, this device. */
 export function SettingsPage() {
+  const run = useAction()
   const settings = useAppStore((s) => s.db.settings)
   const sound = useAppStore((s) => s.db.settings.sound)
   const stations = useAppStore((s) => s.db.stations)
@@ -77,7 +78,7 @@ export function SettingsPage() {
             <Toggle
               checked={settings.askCustomerInfo}
               onChange={(v) => {
-                settingsService.update({ askCustomerInfo: v })
+                run(settingsService.update({ askCustomerInfo: v }))
                 pushToast(v ? 'Guest lookup opens with every new sitting' : 'Guest lookup turned off', 'ok')
               }}
               label="Ask who is at the table"
@@ -95,7 +96,7 @@ export function SettingsPage() {
             <Toggle
               checked={settings.wallet.allowPayLater}
               onChange={(allowPayLater) => {
-                settingsService.update({ wallet: { ...settings.wallet, allowPayLater } })
+                run(settingsService.update({ wallet: { ...settings.wallet, allowPayLater } }))
                 pushToast(allowPayLater ? 'Bills can be left on a wallet' : 'Every bill must be settled at the table', 'ok')
               }}
               label="Allow pay later"
@@ -110,7 +111,7 @@ export function SettingsPage() {
           <Toggle
             checked={sound.newOrderAlert}
             onChange={(newOrderAlert) => {
-              settingsService.update({ sound: { ...sound, newOrderAlert } })
+              run(settingsService.update({ sound: { ...sound, newOrderAlert } }))
               pushToast(newOrderAlert ? 'Kitchen rings on every new order' : 'Kitchen alert sound off', 'ok')
             }}
             label="New order alert sound"
@@ -128,7 +129,7 @@ export function SettingsPage() {
             <Segmented<VolumeKey>
               size="sm"
               value={volumeKey(sound.volume)}
-              onChange={(key) => settingsService.update({ sound: { ...sound, volume: VOLUME_LEVELS[key] } })}
+              onChange={(key) => run(settingsService.update({ sound: { ...sound, volume: VOLUME_LEVELS[key] } }))}
               options={[
                 { value: 'low', label: 'Low' },
                 { value: 'medium', label: 'Medium' },
@@ -148,7 +149,7 @@ export function SettingsPage() {
             <Toggle
               checked={sound.repeatUntilAcknowledged}
               onChange={(repeatUntilAcknowledged) =>
-                settingsService.update({ sound: { ...sound, repeatUntilAcknowledged } })
+                run(settingsService.update({ sound: { ...sound, repeatUntilAcknowledged } }))
               }
               label="Repeat until acknowledged"
             />
@@ -163,9 +164,14 @@ export function SettingsPage() {
                   max={300}
                   value={sound.repeatSeconds}
                   onChange={(e) =>
-                    settingsService.update({
-                      sound: { ...sound, repeatSeconds: Math.min(300, Math.max(5, Number(e.target.value) || 25)) },
-                    })
+                    run(
+                      settingsService.update({
+                        sound: {
+                          ...sound,
+                          repeatSeconds: Math.min(300, Math.max(5, Number(e.target.value) || 25)),
+                        },
+                      }),
+                    )
                   }
                 />
               </Field>

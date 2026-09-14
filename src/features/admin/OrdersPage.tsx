@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '@/components/layout/AdminLayout'
 import { OrderItemLine, OrderTotals } from '@/components/order/OrderBits'
-import { useToasts } from '@/components/toast'
+import { useAction, useToasts } from '@/components/toast'
 import { Badge, Button, Card, EmptyState, Field, Modal, Textarea } from '@/components/ui'
 import { ORDER_STATUS_META } from '@/lib/statusMeta'
 import { cn, elapsedLabel, timeLabel } from '@/lib/utils'
@@ -195,6 +195,7 @@ function OrderCard({
 }
 
 function CancelDialog({ order, onClose }: { order: Order | null; onClose: () => void }) {
+  const run = useAction()
   const [reason, setReason] = useState('')
   const pushToast = useToasts((s) => s.push)
 
@@ -216,7 +217,7 @@ function CancelDialog({ order, onClose }: { order: Order | null; onClose: () => 
             variant="danger"
             onClick={() => {
               if (!order) return
-              orderService.cancelOrder(order.id, reason.trim() || 'Cancelled by admin')
+              run(orderService.cancelOrder(order.id, reason.trim() || 'Cancelled by admin'))
               pushToast(`Order #${order.orderNumber} cancelled`, 'danger')
               onClose()
             }}

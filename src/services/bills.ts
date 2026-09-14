@@ -5,10 +5,9 @@ import { nextNumber } from './firebase/sequences'
 import { requireCatalogue, requireOutletId, requireSession } from './context'
 import { stageAudit } from './audit'
 import { stageWalletEntry } from './wallet'
+import { customerService, resolveCustomer } from './customers'
 import {
   computeBillPreview,
-  customerById,
-  findCustomer,
   isActiveOrder,
   planSettlement,
   walletBalance,
@@ -77,9 +76,12 @@ export const billService = {
 
     const first = [...open].sort((a, b) => a.placedAt.localeCompare(b.placedAt))[0]
     const phone = first?.customerPhone
+    // The id first, then the number the round was taken under. The second is
+    // the recovery path for a round written before the guest resolved, and
+    // it costs a read only when the first misses.
     const customer =
-      customerById(live.customers, first?.customerId) ??
-      (phone ? findCustomer(live.customers, phone) : undefined)
+      (await resolveCustomer(first?.customerId)) ??
+      (phone ? ((await customerService.get(phone)) ?? undefined) : undefined)
 
     const preview = computeBillPreview({ rounds: open, discountAmount: input.discountAmount })
     const plan = planSettlement({

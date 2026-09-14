@@ -2,7 +2,7 @@ import { ArrowLeft, Minus, Plus, Search, ShoppingBag, SlidersHorizontal, Trash2 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { CustomerSheet, GuestChip, useAccount } from '@/components/customer/CustomerBits'
-import { useToasts } from '@/components/toast'
+import { useAction, useToasts } from '@/components/toast'
 import { Button, Card, Modal, Textarea, VegMark } from '@/components/ui'
 import { assetUrl, byDisplayOrder, cn, formatINR } from '@/lib/utils'
 import { toAppError } from '@/lib/errors'
@@ -43,6 +43,7 @@ function lineKey(itemId: ID, modifiers: CartModifierSelection[], instructions: s
 }
 
 export function TakeOrderPage() {
+  const run = useAction()
   const { tableId } = useParams<{ tableId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -453,7 +454,7 @@ export function TakeOrderPage() {
           // Rounds already placed carry the guest; a sitting that has not
           // started yet only needs the URL to change.
           if (existingRounds.length > 0) {
-            orderService.setSittingCustomer(table.id, groupNo, picked?.id ?? null)
+            run(orderService.setSittingCustomer(table.id, groupNo, picked?.id ?? null))
           } else {
             const next: Record<string, string> = { group: String(groupNo) }
             if (picked) next.customer = picked.id

@@ -4,8 +4,8 @@ import { orderRef } from './firebase/paths'
 import { nextNumber } from './firebase/sequences'
 import { requireCatalogue, requireOutletId, requireSession } from './context'
 import { stageAudit } from './audit'
+import { resolveCustomer } from './customers'
 import {
-  customerById,
   isActiveOrder,
   isKitchenActiveOrder,
   lineUnitPrice,
@@ -14,7 +14,7 @@ import {
 } from './rules'
 import { businessDayConfig } from './settings'
 import { todayBusinessDate } from '@/lib/businessDate'
-import { toAppError } from '@/lib/errors'
+import { AppError, toAppError } from '@/lib/errors'
 import { nowISO, uid } from '@/lib/utils'
 import type { ID, Order, OrderItem, OrderItemModifier } from '@/types'
 
@@ -59,7 +59,7 @@ export const orderService = {
       const table = live.tables.find((t) => t.id === input.tableId)
       const stationById = new Map(live.stations.map((s) => [s.id, s]))
       const categoryById = new Map(live.categories.map((c) => [c.id, c]))
-      const customer = customerById(live.customers, input.customerId)
+      const customer = await resolveCustomer(input.customerId)
 
       const items: OrderItem[] = input.lines.map((line) => {
         const modifiers: OrderItemModifier[] = line.modifiers.map((m) => ({
@@ -136,8 +136,10 @@ export const orderService = {
     const open = live.orders.filter(
       (o) => o.tableId === tableId && o.groupNo === groupNo && isActiveOrder(o),
     )
-    if (open.length === 0) return
-    const customer = customerId ? customerById(live.customers, customerId) : undefined
+    if (open.length === 0) {
+      throw new AppError('There is nothing open on this table to attach a guest to.', 'order/none-open')
+    }
+    const customer = await resolveCustomer(customerId ?? undefined)
 
     try {
       const batch = writeBatch(firestore)
@@ -158,10 +160,19 @@ export const orderService = {
   async cancelOrder(orderId: ID, reason: string): Promise<void> {
     const outletId = requireOutletId()
     const order = requireCatalogue().orders.find((o) => o.id === orderId)
-    // Delivered rounds are part of the open bill and can't be cancelled here.
-    if (!order || order.status === 'settled' || order.status === 'cancelled' || order.status === 'delivered') {
-      return
+    if (!order) throw new AppError('That round no longer exists.', 'order/gone')
+    if (order.status === 'settled') {
+      throw new AppError('That round is already paid for and cannot be cancelled.', 'order/settled')
     }
+    // Delivered rounds are part of the open bill: voiding is the right door,
+    // and it asks for a reason and writes an audit line.
+    if (order.status === 'delivered') {
+      throw new AppError(
+        'The food has already gone out. Use Void on the round instead, which records why.',
+        'order/delivered',
+      )
+    }
+    if (order.status === 'cancelled') return
     const now = nowISO()
     try {
       const batch = writeBatch(firestore)
@@ -191,7 +202,13 @@ export const orderService = {
   async voidDeliveredRound(orderId: ID, reason: string): Promise<void> {
     const outletId = requireOutletId()
     const order = requireCatalogue().orders.find((o) => o.id === orderId)
-    if (!order || order.status !== 'delivered') return
+    if (!order) throw new AppError('That round no longer exists.', 'order/gone')
+    if (order.status === 'settled') {
+      throw new AppError('That round is already paid for and cannot be voided.', 'order/settled')
+    }
+    if (order.status !== 'delivered') {
+      throw new AppError('Only a round that has gone out can be voided.', 'order/not-delivered')
+    }
     const now = nowISO()
     try {
       const batch = writeBatch(firestore)
@@ -233,10 +250,20 @@ export const orderService = {
     const outletId = requireOutletId()
     const session = requireSession()
     const order = requireCatalogue().orders.find((o) => o.id === input.orderId)
-    if (!order || order.status === 'settled' || order.status === 'cancelled') return
+    if (!order) throw new AppError('That round no longer exists.', 'order/gone')
+    if (order.status === 'settled') {
+      throw new AppError('That round is already paid for and cannot be corrected.', 'order/settled')
+    }
+    if (order.status === 'cancelled') {
+      throw new AppError('That round was cancelled.', 'order/cancelled')
+    }
     const item = order.items.find((i) => i.id === input.itemId)
-    if (!item || item.status === 'cancelled') return
+    if (!item || item.status === 'cancelled') {
+      throw new AppError('That item is no longer on the round.', 'order/item-gone')
+    }
 
+    // Nothing to do rather than something wrong: the caller asked for the
+    // quantity it already has, which the correction sheet allows.
     const next = Math.max(0, Math.floor(input.quantity))
     if (next >= item.quantity) return
 
@@ -301,7 +328,9 @@ export const orderService = {
   async markDelivered(orderId: ID): Promise<void> {
     const outletId = requireOutletId()
     const order = requireCatalogue().orders.find((o) => o.id === orderId)
-    if (!order || order.status !== 'ready') return
+    if (!order) throw new AppError('That round is no longer on the board.', 'order/gone')
+    // Somebody else carried it out in the last second. Benign.
+    if (order.status !== 'ready') return
     try {
       await writeBatch(firestore)
         .update(orderRef(outletId, orderId), { status: 'delivered', deliveredAt: nowISO() })

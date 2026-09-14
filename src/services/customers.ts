@@ -1,8 +1,8 @@
 import { getDoc, setDoc, writeBatch } from 'firebase/firestore'
 import { firestore } from './firebase/app'
 import { customerRef } from './firebase/paths'
-import { requireOutletId } from './context'
-import { normalisePhone } from './rules'
+import { requireCatalogue, requireOutletId } from './context'
+import { customerById, normalisePhone } from './rules'
 import { toAppError } from '@/lib/errors'
 import { nowISO } from '@/lib/utils'
 import type { Customer, ID } from '@/types'
@@ -79,4 +79,32 @@ export const customerService = {
       throw toAppError(error, 'Could not save the guest.')
     }
   },
+}
+
+/**
+ * The guest behind an id, wherever they happen to be.
+ *
+ * This exists because of a circular assumption that was live in three
+ * services and produced a silent, total failure: `db.customers` is populated
+ * by the listener that follows guests attached to ACTIVE ORDERS. A service
+ * that looked a guest up there before putting them on their first order
+ * always found nothing — so the order was written with no guest, so the
+ * guest never appeared on an order, so they never appeared in the store.
+ * Every customer stayed on zero visits forever and nothing errored.
+ *
+ * Seated guests still cost nothing to resolve; they are already in memory.
+ * A guest being attached for the first time costs one read, which is the
+ * correct price for the one moment it actually matters.
+ */
+export async function resolveCustomer(id: ID | undefined): Promise<Customer | undefined> {
+  if (!id) return undefined
+  const seated = customerById(requireCatalogue().customers, id)
+  if (seated) return seated
+  try {
+    return (await customerService.get(id)) ?? undefined
+  } catch {
+    // Offline and never seen on this device: the order still goes through,
+    // just without the guest attached, which beats refusing the order.
+    return undefined
+  }
 }

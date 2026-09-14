@@ -3,7 +3,7 @@ import { firestore } from './firebase/app'
 import { orderRef } from './firebase/paths'
 import { requireCatalogue, requireOutletId } from './context'
 import { KITCHEN_ACTIVE_STATUSES, orderTotal } from './rules'
-import { toAppError } from '@/lib/errors'
+import { AppError, toAppError } from '@/lib/errors'
 import { nowISO } from '@/lib/utils'
 import type { ID, OrderItem, OrderItemStatus } from '@/types'
 
@@ -26,7 +26,10 @@ export const kitchenService = {
   async startOrder(orderId: ID): Promise<void> {
     const outletId = requireOutletId()
     const order = requireCatalogue().orders.find((o) => o.id === orderId)
-    if (!order || order.status !== 'placed') return
+    if (!order) throw new AppError('That round is no longer on the board.', 'order/gone')
+    // Another cook got there first. The board will catch up on its own, so
+    // this is a race to ignore rather than an error to report.
+    if (order.status !== 'placed') return
     const now = nowISO()
     try {
       await writeBatch(firestore)
@@ -46,8 +49,13 @@ export const kitchenService = {
   async setItemStatus(orderId: ID, itemId: ID, status: OrderItemStatus): Promise<void> {
     const outletId = requireOutletId()
     const order = requireCatalogue().orders.find((o) => o.id === orderId)
-    if (!order || !(KITCHEN_ACTIVE_STATUSES as readonly string[]).includes(order.status)) return
-    if (!order.items.some((i) => i.id === itemId)) return
+    if (!order) throw new AppError('That round is no longer on the board.', 'order/gone')
+    // Delivered or settled while the cook was reaching for it. Nothing to
+    // say: the ticket is about to disappear from their screen anyway.
+    if (!(KITCHEN_ACTIVE_STATUSES as readonly string[]).includes(order.status)) return
+    if (!order.items.some((i) => i.id === itemId)) {
+      throw new AppError('That item is no longer on this round.', 'order/item-gone')
+    }
 
     const now = nowISO()
     const items: OrderItem[] = order.items.map((i) => {
