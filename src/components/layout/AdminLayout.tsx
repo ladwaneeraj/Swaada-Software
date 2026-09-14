@@ -2,61 +2,72 @@ import {
   BarChart3,
   BookOpenText,
   ChefHat,
-  ClipboardList,
   Coffee,
   History,
-  LayoutDashboard,
   LogOut,
   Settings,
+  ShieldCheck,
   UsersRound,
   UtensilsCrossed,
 } from 'lucide-react'
-import { useEffect } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import type { LucideIcon } from 'lucide-react'
+import { useMemo } from 'react'
+import { NavLink, Outlet } from 'react-router-dom'
 import { ConnectionBadge } from '@/components/ConnectionBadge'
 import { FullscreenButton } from '@/components/FullscreenButton'
 import { Toaster, useToasts } from '@/components/toast'
 import { cn } from '@/lib/utils'
-import { realtime } from '@/services/realtime'
+import { useOrderEvents } from '@/lib/orderEvents'
 import { useAppStore } from '@/store/useAppStore'
+import type { UserRole } from '@/types'
 
-const NAV = [
-  { to: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/admin/tables', label: 'Tables', icon: UtensilsCrossed },
-  { to: '/admin/orders', label: 'Orders', icon: ClipboardList },
-  { to: '/admin/menu', label: 'Menu', icon: BookOpenText },
-  { to: '/admin/kitchen', label: 'Kitchen', icon: ChefHat },
-  { to: '/admin/customers', label: 'Customers', icon: UsersRound },
-  { to: '/admin/history', label: 'History', icon: History },
-  { to: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
-  { to: '/admin/settings', label: 'Settings', icon: Settings },
-]
+/**
+ * The whole navigation, with who is allowed on each screen. This list is the
+ * single source of truth: the router guards read the same roles, so a screen
+ * can never be reachable by someone it is not listed for.
+ */
+export const NAV = [
+  { to: '/admin/tables', label: 'Tables', icon: UtensilsCrossed, roles: ['admin', 'counter'] },
+  { to: '/admin/kitchen', label: 'Kitchen', icon: ChefHat, roles: ['admin', 'counter'] },
+  { to: '/admin/history', label: 'History', icon: History, roles: ['admin'] },
+  { to: '/admin/customers', label: 'Customers', icon: UsersRound, roles: ['admin'] },
+  { to: '/admin/menu', label: 'Menu', icon: BookOpenText, roles: ['admin'] },
+  { to: '/admin/analytics', label: 'Analytics', icon: BarChart3, roles: ['admin'] },
+  { to: '/admin/staff', label: 'Staff', icon: ShieldCheck, roles: ['admin'] },
+  { to: '/admin/settings', label: 'Settings', icon: Settings, roles: ['admin'] },
+] as const satisfies ReadonlyArray<{
+  to: string
+  label: string
+  icon: LucideIcon
+  roles: ReadonlyArray<UserRole>
+}>
 
 export function AdminLayout() {
   const session = useAppStore((s) => s.session)
-  const logout = useAppStore((s) => s.logout)
+  const signOut = useAppStore((s) => s.signOut)
   const cafeName = useAppStore((s) => s.db.settings.cafeName)
-  const navigate = useNavigate()
   const pushToast = useToasts((s) => s.push)
 
-  // Surface kitchen progress to the admin without them watching the screen.
-  useEffect(() => {
-    return realtime.subscribe((event) => {
-      const orders = useAppStore.getState().db.orders
-      if (event.type === 'ORDER_READY') {
-        const order = orders.find((o) => o.id === event.orderId)
-        if (order) pushToast(`Order #${order.orderNumber} · ${order.tableName} is ready`, 'ok')
-      }
-      if (event.type === 'ORDER_DELIVERED') {
-        const order = orders.find((o) => o.id === event.orderId)
-        if (order) pushToast(`Order #${order.orderNumber} delivered · ${order.tableName} bill open`, 'accent')
-      }
-    })
-  }, [pushToast])
+  const nav = useMemo(
+    () => NAV.filter((item) => session && (item.roles as ReadonlyArray<UserRole>).includes(session.role)),
+    [session],
+  )
 
+  // Surface kitchen progress to the admin without them watching the screen.
+  useOrderEvents(({ type, order }) => {
+    if (type === 'ready') {
+      pushToast(`Order #${order.orderNumber} · ${order.tableName} is ready`, 'ok')
+    }
+    if (type === 'delivered') {
+      pushToast(`Order #${order.orderNumber} delivered · ${order.tableName} bill open`, 'accent')
+    }
+  })
+
+  // Signing out clears the auth token, which tears down every listener and
+  // wipes the snapshot. The route guard sends us to /login from there, so
+  // there is no navigate here to race with it.
   const handleLogout = () => {
-    logout()
-    navigate('/login')
+    void signOut()
   }
 
   return (
@@ -75,7 +86,7 @@ export function AdminLayout() {
           </div>
 
           <nav className="no-scrollbar flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto" aria-label="Main">
-            {NAV.map(({ to, label, icon: Icon }) => (
+            {nav.map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={to}
                 to={to}

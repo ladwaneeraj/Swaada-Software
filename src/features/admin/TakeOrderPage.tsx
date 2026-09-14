@@ -5,13 +5,14 @@ import { CustomerSheet, GuestChip, useAccount } from '@/components/customer/Cust
 import { useToasts } from '@/components/toast'
 import { Button, Card, Modal, Textarea, VegMark } from '@/components/ui'
 import { assetUrl, byDisplayOrder, cn, formatINR } from '@/lib/utils'
+import { toAppError } from '@/lib/errors'
 import {
   itemsForCategory,
   optionsForGroup,
   orderService,
   searchMenu,
   sortedActiveCategories,
-  activeOrdersForTable,
+  activeOrdersForGroup,
   type CartModifierSelection,
 } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
@@ -57,7 +58,10 @@ export function TakeOrderPage() {
   const settings = useAppStore((s) => s.db.settings)
 
   const table = tables.find((t) => t.id === tableId)
-  const existingRounds = table ? activeOrdersForTable(orders, table.id) : []
+  // One table can seat several parties; this screen only ever builds a round
+  // for the one named in the URL.
+  const groupNo = Math.max(1, Number(searchParams.get('group')) || 1)
+  const existingRounds = table ? activeOrdersForGroup(orders, table.id, groupNo) : []
   const roundNumber = existingRounds.length + 1
   const billSoFar = existingRounds.reduce((s, o) => s + o.total, 0)
 
@@ -71,6 +75,7 @@ export function TakeOrderPage() {
   const [lines, setLines] = useState<CartLine[]>([])
   const [sheet, setSheet] = useState<{ item: MenuItem; editingKey?: string } | null>(null)
   const [cartOpen, setCartOpen] = useState(false)
+  const [sending, setSending] = useState(false)
   const [changingGuest, setChangingGuest] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -169,21 +174,33 @@ export function TakeOrderPage() {
     0,
   )
 
-  const placeOrder = () => {
-    if (!session || !table || lines.length === 0) return
-    const order = orderService.placeOrder({
-      tableId: table.id,
-      lines: lines.map((l) => ({
-        menuItem: l.menuItem,
-        quantity: l.quantity,
-        modifiers: l.modifiers,
-        specialInstructions: l.specialInstructions,
-      })),
-      session,
-      customerId,
-    })
-    pushToast(`Round ${roundNumber} · order #${order.orderNumber} sent to kitchen`, 'ok')
-    navigate('/admin/tables')
+  /**
+   * Sending a round to the kitchen. Guarded against a double tap, because
+   * this one writes a NEW document every time — a second press would put a
+   * duplicate ticket in front of the cook, and the server has no way to
+   * tell it apart from a genuine repeat order.
+   */
+  const placeOrder = async () => {
+    if (!session || !table || lines.length === 0 || sending) return
+    setSending(true)
+    try {
+      const order = await orderService.placeOrder({
+        tableId: table.id,
+        lines: lines.map((l) => ({
+          menuItem: l.menuItem,
+          quantity: l.quantity,
+          modifiers: l.modifiers,
+          specialInstructions: l.specialInstructions,
+        })),
+        customerId,
+        groupNo,
+      })
+      pushToast(`Round ${roundNumber} · order #${order.orderNumber} sent to kitchen`, 'ok')
+      navigate('/admin/tables')
+    } catch (error) {
+      pushToast(toAppError(error, 'Could not send the order.').userMessage, 'danger')
+      setSending(false)
+    }
   }
 
   // Who the sitting belongs to, shown where the bill is built so the
@@ -215,38 +232,49 @@ export function TakeOrderPage() {
     )
   }
 
+  /**
+   * Whenever more than one category is on screen — searching, or browsing all
+   * items — the tiles are grouped under their category heading. Searching
+   * "corn" otherwise returns a wall of near-identical names where the word
+   * that actually distinguishes them is buried in the middle of each one.
+   */
+  const groupedBody = (list: MenuItem[]) =>
+    activeCategories.map((c) => {
+      const inCategory = itemsForCategory(list, c.id)
+      if (inCategory.length === 0) return null
+      return (
+        <section key={c.id} className="mb-3">
+          <h3 className="sticky top-0 z-10 -mx-0.5 mb-2 bg-surface-100/90 px-0.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-ink-500 backdrop-blur">
+            <span aria-hidden>{c.icon}</span> {c.name}
+            <span className="ml-1.5 font-semibold text-ink-300">{inCategory.length}</span>
+          </h3>
+          <ItemGrid
+            items={inCategory}
+            qtyByItem={qtyByItem}
+            pricedFrom={pricedFrom}
+            onAdd={quickAdd}
+            onCustomize={(item) => setSheet({ item })}
+            under={c.name}
+          />
+        </section>
+      )
+    })
+
   const menuBody =
     visibleItems.length === 0 ? (
       <p className="py-16 text-center text-sm text-ink-500">No items match “{query}”.</p>
-    ) : query.trim() || activeCategoryId !== 'all' ? (
+    ) : !query.trim() && activeCategoryId !== 'all' ? (
+      // One category on its own needs no heading above every tile.
       <ItemGrid
         items={visibleItems}
         qtyByItem={qtyByItem}
         pricedFrom={pricedFrom}
         onAdd={quickAdd}
         onCustomize={(item) => setSheet({ item })}
+        under={activeCategories.find((c) => c.id === activeCategoryId)?.name}
       />
     ) : (
-      // "All items" keeps the menu's own order and labels each run, so the
-      // list reads like the printed menu instead of one undifferentiated wall.
-      activeCategories.map((c) => {
-        const list = itemsForCategory(orderableItems, c.id)
-        if (list.length === 0) return null
-        return (
-          <section key={c.id} className="mb-3">
-            <h3 className="sticky top-0 z-10 -mx-0.5 mb-2 bg-surface-100/90 px-0.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-ink-500 backdrop-blur">
-              <span aria-hidden>{c.icon}</span> {c.name}
-            </h3>
-            <ItemGrid
-              items={list}
-              qtyByItem={qtyByItem}
-              pricedFrom={pricedFrom}
-              onAdd={quickAdd}
-              onCustomize={(item) => setSheet({ item })}
-            />
-          </section>
-        )
-      })
+      groupedBody(visibleItems)
     )
 
   return (
@@ -424,8 +452,13 @@ export function TakeOrderPage() {
           if (!table) return
           // Rounds already placed carry the guest; a sitting that has not
           // started yet only needs the URL to change.
-          if (existingRounds.length > 0) orderService.setSittingCustomer(table.id, picked?.id ?? null)
-          else setSearchParams(picked ? { customer: picked.id } : {}, { replace: true })
+          if (existingRounds.length > 0) {
+            orderService.setSittingCustomer(table.id, groupNo, picked?.id ?? null)
+          } else {
+            const next: Record<string, string> = { group: String(groupNo) }
+            if (picked) next.customer = picked.id
+            setSearchParams(next, { replace: true })
+          }
         }}
       />
 
@@ -508,18 +541,33 @@ function CategoryChip({ label, icon, active, onClick }: { label: string; icon: s
 
 /* ------------------------------- Item tiles ------------------------------ */
 
+/**
+ * The menu writes every item with its category in front of it — "Maggi Cheesy
+ * Schezwan" — which is right on a bill and on a kitchen ticket, but under a
+ * MAGGI heading the first word is already on screen. Dropping it there buys
+ * the tile enough room to show the rest of the name in full.
+ */
+function shortName(name: string, under?: string): string {
+  if (!under) return name
+  const prefix = `${under} `
+  return name.startsWith(prefix) ? name.slice(prefix.length) : name
+}
+
 function ItemGrid({
   items,
   qtyByItem,
   pricedFrom,
   onAdd,
   onCustomize,
+  under,
 }: {
   items: MenuItem[]
   qtyByItem: Map<ID, number>
   pricedFrom: (item: MenuItem) => boolean
   onAdd: (item: MenuItem) => void
   onCustomize: (item: MenuItem) => void
+  /** The category heading these tiles sit under, when there is one. */
+  under?: string
 }) {
   return (
     <div className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-1.5 sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]">
@@ -527,6 +575,7 @@ function ItemGrid({
         <ItemTile
           key={item.id}
           item={item}
+          label={shortName(item.name, under)}
           qtyInCart={qtyByItem.get(item.id) ?? 0}
           hasPricedSize={pricedFrom(item)}
           onAdd={() => onAdd(item)}
@@ -545,12 +594,15 @@ function ItemGrid({
  */
 function ItemTile({
   item,
+  label,
   qtyInCart,
   hasPricedSize,
   onAdd,
   onCustomize,
 }: {
   item: MenuItem
+  /** What the tile shows. The full name still goes on the ticket and bill. */
+  label: string
   qtyInCart: number
   hasPricedSize: boolean
   onAdd: () => void
@@ -597,7 +649,7 @@ function ItemTile({
         <span className="min-w-0 flex-1">
           <span className="flex items-start gap-1">
             {showImage && <VegMark isVeg={item.isVegetarian} className="mt-px size-3 shrink-0" />}
-            <span className="line-clamp-2 text-[12px] font-semibold leading-tight">{item.name}</span>
+            <span className="text-[12px] font-semibold leading-tight">{label}</span>
           </span>
           <span className="mt-0.5 block text-[12px] font-bold tabular-nums">
             {hasPricedSize && <span className="font-normal text-ink-500">from </span>}

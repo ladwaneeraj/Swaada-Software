@@ -1,9 +1,14 @@
 /**
- * Domain models for the Swaada Café order system.
+ * Domain models for the Swaada Café POS.
  *
- * Everything here is designed to map 1:1 onto database tables later
- * (Supabase/PostgreSQL). IDs are strings so they can become UUIDs without
- * touching the UI. Timestamps are ISO strings for the same reason.
+ * These are the shapes the UI works with. Firestore stores them almost
+ * verbatim (see services/firebase/converters.ts for the few differences:
+ * modifier options are nested inside their group, and timestamps are stored
+ * as Firestore Timestamps and read back as ISO strings).
+ *
+ * Everything lives under one outlet: /outlets/{outletId}/<collection>/{id}.
+ * IDs are strings. Timestamps are ISO strings so they sort lexically and
+ * survive JSON without a Date round-trip.
  */
 
 export type ID = string
@@ -11,6 +16,22 @@ export type ID = string
 export interface Timestamps {
   createdAt: string
   updatedAt: string
+}
+
+/* ------------------------------------------------------------------ */
+/* Outlet                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One cafe. Everything else hangs off this, so a second branch is a new
+ * document rather than a migration.
+ */
+export interface Outlet extends Timestamps {
+  id: ID
+  name: string
+  /** Short lowercase handle used in usernames and exports, e.g. "swaada". */
+  slug: string
+  isActive: boolean
 }
 
 /* ------------------------------------------------------------------ */
@@ -89,6 +110,12 @@ export interface Station {
   icon: string
   displayOrder: number
   isActive: boolean
+  /**
+   * False for a shelf rather than a stove: cigarettes and bottled water are
+   * handed over at the counter, so they never reach the kitchen board and
+   * never wait to be cooked. They still appear on the bill like anything else.
+   */
+  preparesFood: boolean
 }
 
 /* ------------------------------------------------------------------ */
@@ -179,8 +206,21 @@ export interface OrderItem {
 export interface Order {
   id: ID
   orderNumber: number
+  /**
+   * The cafe day this round belongs to (YYYY-MM-DD in the outlet's zone).
+   * Every bounded query filters on this: it is what keeps the live listeners
+   * small and the read bill near zero as history grows.
+   */
+  businessDate: string
   tableId: ID | null
   tableName: string
+  /**
+   * Which party at the table this round belongs to. One table often seats
+   * two or three separate groups who each pay for themselves, so the bill is
+   * grouped by (table, groupNo) rather than by table alone. Everything that
+   * came before the split is group 1.
+   */
+  groupNo: number
   items: OrderItem[]
   status: OrderStatus
   /** Sum of the round's active lines. No tax is applied anywhere. */
@@ -220,8 +260,12 @@ export type BillPayments = Record<PaymentMethod, number>
 export interface Bill {
   id: ID
   billNumber: number
+  /** Same cafe day as the rounds it settles. See Order.businessDate. */
+  businessDate: string
   tableId: ID | null
   tableName: string
+  /** The party at that table this bill settles. */
+  groupNo: number
   orderIds: ID[]
   orderNumbers: number[]
   customerId?: ID
@@ -238,7 +282,12 @@ export interface Bill {
   walletApplied: number
   /** Left on the guest's wallet to pay next time. */
   creditAmount: number
-  /** Handed over beyond the bill and kept in the wallet. */
+  /**
+   * Old dues the guest cleared at the same counter visit. Money on top of
+   * this bill, which is why `payments` can exceed `total`.
+   */
+  duesCleared: number
+  /** Handed over beyond the bill and its dues, and kept in the wallet. */
   walletTopUp: number
   settledAt: string
   settledByUserId: ID
@@ -257,6 +306,22 @@ export interface Customer extends Timestamps {
   name: string
   /** Anything the counter wants to remember ("regular, likes table G2"). */
   note?: string
+  /**
+   * A CACHE of the wallet balance, not the truth.
+   *
+   * The truth is still the signed sum of the guest's ledger, and every
+   * screen that shows one guest recomputes it from their entries. This field
+   * exists only so the guest book can answer "who owes me money" in one
+   * query — without it, listing fifty guests with balances would mean fifty
+   * ledger reads, and filtering by who owes would be impossible.
+   *
+   * It is kept honest by never being assigned: every wallet entry is written
+   * in the same atomic batch as an `increment()` on this field, so the two
+   * move together or not at all, offline included. If it ever does drift,
+   * the guest's own page will disagree with the list, which is the right
+   * way round — the cheap number is the one that looks wrong.
+   */
+  balance?: number
 }
 
 /**
@@ -289,6 +354,8 @@ export type WalletEntryKind = (typeof WALLET_ENTRY_KINDS)[number]
 export interface WalletEntry {
   id: ID
   customerId: ID
+  /** Cafe day, for the day-end figures. See Order.businessDate. */
+  businessDate: string
   amount: number
   kind: WalletEntryKind
   /** Set when the entry came out of settling a bill. */
@@ -303,24 +370,144 @@ export interface WalletEntry {
 }
 
 /* ------------------------------------------------------------------ */
-/* Auth                                                                */
+/* Staff, roles and sessions                                           */
 /* ------------------------------------------------------------------ */
 
-export type UserRole = 'admin' | 'kitchen'
+/**
+ * Three people work this app. The manager runs the cafe, the kitchen cooks,
+ * and the counter takes orders and watches the kitchen board — nothing that
+ * touches money, the menu or the books.
+ *
+ * The role is not only a UI concern: it is written into the Firebase auth
+ * token as a custom claim, and the Firestore security rules read it from
+ * there. A counter login physically cannot read the books, whatever the
+ * client code does.
+ */
+export const USER_ROLES = ['admin', 'counter', 'kitchen'] as const
+export type UserRole = (typeof USER_ROLES)[number]
 
-export interface User {
-  id: ID
-  name: string
-  role: UserRole
-  /** 4-digit PIN for the mock login. Replaced by real auth later. */
-  pin: string
+export const ROLE_LABELS: Record<UserRole, string> = {
+  admin: 'Manager',
+  counter: 'Counter',
+  kitchen: 'Kitchen',
 }
 
+/**
+ * A staff member. The document id IS the Firebase Auth uid, so a staff row
+ * and a login are the same thing and can never drift apart.
+ *
+ * This document is also the SOURCE OF TRUTH for the person's role. The
+ * security rules read it on every request with a `get()`, which costs one
+ * document read per request and buys two things worth having: it works
+ * entirely on Firebase's free plan, and a role change or a switch-off takes
+ * effect on the very next request rather than whenever the auth token next
+ * refreshes.
+ *
+ * There is no password field here. Passwords live in Firebase Auth and are
+ * never readable, by us or by anyone.
+ */
+export interface StaffMember extends Timestamps {
+  /** Firebase Auth uid. */
+  id: ID
+  /** Denormalised so the security rules can check it without a second read. */
+  outletId: ID
+  /** What they type to sign in. Unique across the whole system, lowercase. */
+  username: string
+  displayName: string
+  role: UserRole
+  isActive: boolean
+  /** uid of the admin who created them. */
+  createdBy: ID
+  /**
+   * Set when this login was superseded because the person forgot their
+   * password. Without Cloud Functions a manager cannot change someone
+   * else's password, so the recovery path is a new login and this points at
+   * it, keeping the trail readable.
+   */
+  replacedByUsername?: string
+}
+
+/** The signed-in staff member, as the app carries them around. */
 export interface Session {
+  /** Firebase Auth uid. Kept as `userId` so existing call sites still read. */
   userId: ID
+  outletId: ID
+  username: string
   name: string
   role: UserRole
   loginAt: string
+}
+
+/**
+ * The one document outside any outlet: it answers "which outlet does this
+ * uid belong to", which a freshly signed-in browser has to know before it is
+ * allowed to read anything else. A staff member may read only their own.
+ */
+export interface StaffIndexEntry {
+  /** Firebase Auth uid. */
+  id: ID
+  outletId: ID
+  username: string
+}
+
+/**
+ * A claimed username, keyed BY the username itself.
+ *
+ * Usernames are global, because the synthetic email they map to is global.
+ * A browser cannot ask Firebase Auth "does this account exist" — so without
+ * this, the only way to discover a clash would be to try creating the
+ * account and read the error, which burns a real auth user on every typo.
+ * This makes the check a single get by id, before anything is created.
+ */
+export interface UsernameClaim {
+  /** The username, lowercase. Also the document id. */
+  id: ID
+  uid: ID
+  outletId: ID
+}
+
+/* ------------------------------------------------------------------ */
+/* Audit log                                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Append-only record of anything that moves money or changes what the cafe
+ * sells. The security rules allow create and deny update and delete, so a
+ * manager cannot quietly rewrite last week.
+ */
+export const AUDIT_ACTIONS = [
+  'order.void',
+  'order.cancel',
+  'order.item_adjust',
+  'bill.settle',
+  'bill.discount',
+  'wallet.adjust',
+  'wallet.refund',
+  'menu.price_change',
+  'menu.archive',
+  'staff.create',
+  'staff.update',
+  'staff.disable',
+  'staff.password_reset',
+  'settings.update',
+] as const
+export type AuditAction = (typeof AUDIT_ACTIONS)[number]
+
+export interface AuditEntry {
+  id: ID
+  action: AuditAction
+  /** Cafe day, so the log can be read a day at a time. */
+  businessDate: string
+  at: string
+  byUserId: ID
+  byName: string
+  byRole: UserRole
+  /** Free-form, one line, written for a human reading it a month later. */
+  summary: string
+  /** The thing acted on, for filtering: { orderId, billId, itemId, ... }. */
+  target?: Record<string, string | number>
+  /** Before/after for value changes, e.g. { field: 'basePrice', from: 80, to: 90 }. */
+  change?: Record<string, string | number | null>
 }
 
 /* ------------------------------------------------------------------ */
@@ -330,6 +517,10 @@ export interface Session {
 export interface CafeSettings {
   cafeName: string
   currency: 'INR'
+  /** IANA zone the cafe's day is measured in. See lib/businessDate.ts. */
+  timezone: string
+  /** Rounds rung up before this hour count as the previous business day. */
+  dayStartHour: number
   /** Open the guest lookup when a table's first round is started. */
   askCustomerInfo: boolean
   /** Customer wallets: money held for a guest, and bills paid later. */
@@ -351,42 +542,63 @@ export interface CafeSettings {
 }
 
 /* ------------------------------------------------------------------ */
-/* Persistence snapshot (the mock "database")                          */
+/* Live state held in memory                                           */
 /* ------------------------------------------------------------------ */
 
-export interface DBSnapshot {
-  schemaVersion: number
+/**
+ * What the app keeps in memory, and NOT what the database holds.
+ *
+ * This is the single most important change from the prototype. The mock db
+ * kept every order ever taken in one object and handed it to every screen.
+ * Against a real database that pattern means downloading the whole history
+ * on every app start, which is slow, expensive, and gets worse every day the
+ * cafe is open.
+ *
+ * So the listeners are scoped:
+ *   - the catalogue (menu, tables, stations, staff, settings) is small and
+ *     changes rarely, so it is held in full;
+ *   - `orders` holds only UNSETTLED rounds — what is on the floor right now;
+ *   - `bills` and `walletEntries` hold only TODAY, for the day-end figures.
+ *
+ * History, analytics and customer search do not live here at all. They run
+ * paged queries against Firestore on demand (services/firebase/queries.ts),
+ * so opening last month's numbers costs one query instead of being carried
+ * around all day.
+ */
+export interface LiveSnapshot {
+  outlet: Outlet | null
   categories: Category[]
   items: MenuItem[]
   modifierGroups: ModifierGroup[]
   modifierOptions: ModifierOption[]
   stations: Station[]
   tables: CafeTable[]
+  /** Unsettled rounds only. */
   orders: Order[]
+  /**
+   * Today's cancelled rounds. A cancelled round leaves `orders` (it is no
+   * longer active), so without this the kitchen would simply watch a ticket
+   * vanish mid-cook with no explanation. Bounded to one day.
+   */
+  recentlyCancelled: Order[]
+  /** Today's bills only. */
   bills: Bill[]
-  customers: Customer[]
+  /** Today's wallet movements only. */
   walletEntries: WalletEntry[]
-  users: User[]
+  /** Today's customers are fetched on demand; this holds ones in play now. */
+  customers: Customer[]
+  staff: StaffMember[]
   settings: CafeSettings
-  counters: { nextOrderNumber: number; nextBillNumber: number }
 }
 
 /* ------------------------------------------------------------------ */
-/* Realtime events                                                     */
+/* Connection                                                          */
 /* ------------------------------------------------------------------ */
 
-export type RealtimeEvent =
-  | { type: 'ORDER_CREATED'; orderId: ID }
-  | { type: 'ORDER_UPDATED'; orderId: ID }
-  | { type: 'ITEM_STARTED'; orderId: ID; itemId: ID }
-  | { type: 'ITEM_READY'; orderId: ID; itemId: ID }
-  | { type: 'ORDER_READY'; orderId: ID }
-  | { type: 'ORDER_DELIVERED'; orderId: ID }
-  | { type: 'BILL_SETTLED'; billId: ID; tableId: ID | null }
-  | { type: 'ORDER_CANCELLED'; orderId: ID }
-  | { type: 'CUSTOMERS_UPDATED' }
-  | { type: 'MENU_UPDATED' }
-  | { type: 'TABLES_UPDATED' }
-  | { type: 'SETTINGS_UPDATED' }
-
-export type ConnectionStatus = 'live' | 'offline'
+/**
+ * What the badge in the header shows.
+ *   live     talking to Firestore, everything written is saved
+ *   syncing  online, but this device has writes still on their way up
+ *   offline  serving from the local cache; writes are queued and will sync
+ */
+export type ConnectionStatus = 'live' | 'syncing' | 'offline'

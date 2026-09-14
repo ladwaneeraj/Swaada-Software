@@ -1,6 +1,4 @@
 import { BellRing, ChefHat, LogOut, Volume2, VolumeX } from 'lucide-react'
-import { useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { ConnectionBadge } from '@/components/ConnectionBadge'
 import { FullscreenButton } from '@/components/FullscreenButton'
 import { KitchenBoard } from '@/components/kitchen/KitchenBoard'
@@ -8,7 +6,7 @@ import { Toaster, useToasts } from '@/components/toast'
 import { cn, timeLabel } from '@/lib/utils'
 import { useNow } from '@/lib/useNow'
 import { playOrderChime, useNewOrderAlert, useSoundStatus } from '@/lib/sound'
-import { realtime } from '@/services/realtime'
+import { useOrderEvents } from '@/lib/orderEvents'
 import { settingsService } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
 
@@ -21,33 +19,27 @@ import { useAppStore } from '@/store/useAppStore'
  * not need its own order echoed back at it.
  */
 export function KitchenPage() {
-  const logout = useAppStore((s) => s.logout)
+  const signOut = useAppStore((s) => s.signOut)
   const cafeName = useAppStore((s) => s.db.settings.cafeName)
   const sound = useAppStore((s) => s.db.settings.sound)
-  const navigate = useNavigate()
   const pushToast = useToasts((s) => s.push)
   const now = useNow(30_000)
 
   useNewOrderAlert()
   const soundStatus = useSoundStatus()
 
-  useEffect(() => {
-    return realtime.subscribe((event) => {
-      const orders = useAppStore.getState().db.orders
-      if (event.type === 'ORDER_CREATED') {
-        const order = orders.find((o) => o.id === event.orderId)
-        if (order) pushToast(`New order #${order.orderNumber} · Table ${order.tableName}`, 'info')
-      }
-      if (event.type === 'ORDER_CANCELLED') {
-        const order = orders.find((o) => o.id === event.orderId)
-        if (order) pushToast(`Order #${order.orderNumber} was cancelled`, 'danger')
-      }
-    })
-  }, [pushToast])
+  useOrderEvents(({ type, order }) => {
+    if (type === 'created') {
+      pushToast(`New order #${order.orderNumber} · Table ${order.tableName}`, 'info')
+    }
+    if (type === 'cancelled') {
+      pushToast(`Order #${order.orderNumber} was cancelled — stop cooking it`, 'danger')
+    }
+  })
 
   const toggleSound = () => {
     const on = !sound.newOrderAlert
-    settingsService.update({ sound: { ...sound, newOrderAlert: on } })
+    void settingsService.update({ sound: { ...sound, newOrderAlert: on } })
     // Turning it on is itself the tap the browser wants, so ring once to
     // prove it works and to unlock audio for the rest of the shift.
     if (on) void playOrderChime(sound.volume)
@@ -83,10 +75,7 @@ export function KitchenPage() {
           <FullscreenButton dark />
           <button
             type="button"
-            onClick={() => {
-              logout()
-              navigate('/login')
-            }}
+            onClick={() => void signOut()}
             aria-label="Log out"
             className="grid size-10 place-items-center rounded-xl text-surface-300 hover:bg-white/10"
           >

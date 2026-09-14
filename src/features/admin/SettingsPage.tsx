@@ -1,11 +1,12 @@
-import { RotateCcw, Volume2 } from 'lucide-react'
+import { Volume2 } from 'lucide-react'
 import { useState } from 'react'
 import { PageHeader } from '@/components/layout/AdminLayout'
 import { useToasts } from '@/components/toast'
-import { Badge, Button, Card, Field, Input, Modal, Segmented, Toggle } from '@/components/ui'
+import { Badge, Button, Card, Field, Input, Segmented, Toggle } from '@/components/ui'
 import { byDisplayOrder } from '@/lib/utils'
 import { playOrderChime } from '@/lib/sound'
-import { settingsService } from '@/services'
+import { deviceLabel, remainingInBlock, setDeviceLabel, settingsService } from '@/services'
+import { toAppError } from '@/lib/errors'
 import { useAppStore } from '@/store/useAppStore'
 
 /* Three named steps read better than a slider on a touch screen, and they
@@ -19,20 +20,24 @@ function volumeKey(volume: number): VolumeKey {
   return 'loud'
 }
 
-/** Café-level configuration: identity, wallets, alerts, stations, demo data. */
+/** Café-level configuration: identity, wallets, alerts, stations, this device. */
 export function SettingsPage() {
   const settings = useAppStore((s) => s.db.settings)
   const sound = useAppStore((s) => s.db.settings.sound)
   const stations = useAppStore((s) => s.db.stations)
   const connection = useAppStore((s) => s.connection)
+  const outletId = useAppStore((s) => s.session?.outletId ?? '')
   const pushToast = useToasts((s) => s.push)
 
   const [cafeName, setCafeName] = useState(settings.cafeName)
-  const [confirmReset, setConfirmReset] = useState(false)
 
-  const save = () => {
-    settingsService.update({ cafeName: cafeName.trim() || settings.cafeName })
-    pushToast('Settings saved', 'ok')
+  const save = async () => {
+    try {
+      await settingsService.update({ cafeName: cafeName.trim() || settings.cafeName })
+      pushToast('Settings saved', 'ok')
+    } catch (error) {
+      pushToast(toAppError(error, 'Could not save settings.').userMessage, 'danger')
+    }
   }
 
   return (
@@ -183,8 +188,10 @@ export function SettingsPage() {
       <Card className="mb-5 p-5">
         <h2 className="mb-1 text-base font-bold">Kitchen stations</h2>
         <p className="mb-4 text-sm text-ink-500">
-          Every menu item routes to one of these stations. Today all stations share one kitchen
-          screen; the data model is ready for one screen per station later.
+          Every menu item routes to one of these stations. Today they share one kitchen screen; the
+          data model is ready for one screen per station later. A station marked "handed over" is a
+          shelf rather than a stove, so its items go straight onto the bill and never appear on the
+          kitchen board.
         </p>
         <ul className="space-y-2">
           {[...stations].sort(byDisplayOrder).map((s) => (
@@ -193,6 +200,7 @@ export function SettingsPage() {
                 {s.icon}
               </span>
               <span className="flex-1 text-sm font-semibold">{s.name}</span>
+              {!s.preparesFood && <Badge tone="neutral">Handed over</Badge>}
               <Badge tone={s.isActive ? 'ok' : 'neutral'} dot>
                 {s.isActive ? 'Active' : 'Off'}
               </Badge>
@@ -212,42 +220,44 @@ export function SettingsPage() {
         </Badge>
       </Card>
 
-      <Card className="border border-danger-100 p-5">
-        <h2 className="mb-1 text-base font-bold text-danger-600">Demo data</h2>
+      {/*
+        The prototype had a "reset demo data" button that wiped the mock
+        database back to its seed. Against a real outlet that button would be
+        a way to delete a cafe's trading history in one tap, so it is gone
+        rather than guarded — a destructive action nobody needs is better
+        removed than made harder to reach.
+
+        What the counter actually needs to know is shown instead: this
+        device, and how many bills it can still write if the internet drops.
+      */}
+      <Card className="p-5">
+        <h2 className="mb-1 text-base font-bold">This device</h2>
         <p className="mb-4 text-sm text-ink-500">
-          Reset the menu, tables and all orders back to the sample seed. This cannot be undone.
+          Each device reserves a block of order and bill numbers in advance, so it can keep
+          working through a wifi drop. These are what is left in this device&rsquo;s block.
         </p>
-        <Button variant="secondary" className="text-danger-600" onClick={() => setConfirmReset(true)}>
-          <RotateCcw className="size-4" /> Reset demo data
-        </Button>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Device name">
+            <Input
+              defaultValue={deviceLabel()}
+              onBlur={(e) => {
+                setDeviceLabel(e.target.value)
+                pushToast('Device name saved', 'ok')
+              }}
+              placeholder="Counter tablet"
+            />
+          </Field>
+          <div className="rounded-card bg-surface-100 p-3.5">
+            <p className="text-xs font-bold uppercase tracking-wide text-ink-500">
+              Numbers left offline
+            </p>
+            <p className="mt-1 text-[15px] font-bold">
+              {remainingInBlock(outletId, 'order')} orders · {remainingInBlock(outletId, 'bill')} bills
+            </p>
+          </div>
+        </div>
       </Card>
 
-      <Modal
-        open={confirmReset}
-        onClose={() => setConfirmReset(false)}
-        title="Reset all demo data?"
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setConfirmReset(false)}>
-              Keep my data
-            </Button>
-            <Button
-              variant="danger"
-              onClick={() => {
-                settingsService.resetDemoData()
-                setConfirmReset(false)
-                pushToast('Demo data reset to the sample seed', 'warn')
-              }}
-            >
-              Reset everything
-            </Button>
-          </div>
-        }
-      >
-        <p className="text-sm text-ink-500">
-          All orders, menu edits and table changes will be replaced by the original sample data.
-        </p>
-      </Modal>
     </div>
   )
 }

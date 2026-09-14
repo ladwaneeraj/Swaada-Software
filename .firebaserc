@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "swaada-pos-dev",
+    "dev": "swaada-pos-dev",
+    "prod": "swaada-pos-prod"
+  }
+}

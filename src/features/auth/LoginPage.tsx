@@ -1,41 +1,53 @@
-import { ChefHat, Coffee, Delete, ShieldCheck } from 'lucide-react'
-import { useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Coffee, Eye, EyeOff, LoaderCircle, LogIn } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
+import { Navigate } from 'react-router-dom'
 import { homeForRole } from '@/components/layout/RequireRole'
 import { cn } from '@/lib/utils'
-import { authService } from '@/services'
+import { toAppError } from '@/lib/errors'
 import { useAppStore } from '@/store/useAppStore'
-import type { User } from '@/types'
 
 /**
- * Mock PIN login. Sessions are per-tab, so Admin and Kitchen can run side
- * by side in two tabs — that is the demo setup for realtime sync.
+ * Username and password, not a PIN and not an email.
+ *
+ * Behind this form the username is turned into a synthetic address so
+ * Firebase Auth can hold it, but nothing about that reaches the person
+ * typing. The manager creates these logins on the Staff screen; there is
+ * deliberately no "sign up" here, because a cafe does not want anyone
+ * making themselves an account.
+ *
+ * The form does NOT navigate on success. Signing in changes the auth token,
+ * the store picks that up, and the route guard moves the person to the right
+ * home screen for their role. One path in, whether they just signed in or
+ * arrived with a session already alive.
  */
 export function LoginPage() {
   const session = useAppStore((s) => s.session)
-  const login = useAppStore((s) => s.login)
+  const authReady = useAppStore((s) => s.authReady)
+  const signIn = useAppStore((s) => s.signIn)
   const cafeName = useAppStore((s) => s.db.settings.cafeName)
-  const navigate = useNavigate()
 
-  const users = authService.listUsers()
-  const [selected, setSelected] = useState<User | null>(null)
-  const [pin, setPin] = useState('')
-  const [error, setError] = useState(false)
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
   if (session) return <Navigate to={homeForRole(session.role)} replace />
 
-  const pressDigit = (d: string) => {
-    if (!selected || pin.length >= 4) return
-    const next = pin + d
-    setPin(next)
-    setError(false)
-    if (next.length === 4) {
-      if (login(selected.id, next)) {
-        navigate(homeForRole(selected.role))
-      } else {
-        setError(true)
-        window.setTimeout(() => setPin(''), 350)
-      }
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await signIn(username, password)
+      // No navigate here on purpose: the session arriving in the store is
+      // what moves us, via the redirect above.
+    } catch (caught) {
+      setError(toAppError(caught, 'Could not sign in.').userMessage)
+      setPassword('')
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -58,99 +70,95 @@ export function LoginPage() {
             them move from placed to paid in real time.
           </p>
         </div>
-        <p className="text-sm text-surface-400">Prototype build · mock data, no backend yet</p>
-        <div className="pointer-events-none absolute -right-24 -top-24 size-96 rounded-full bg-accent-500/20 blur-3xl" aria-hidden />
-        <div className="pointer-events-none absolute -bottom-32 -left-16 size-96 rounded-full bg-accent-500/10 blur-3xl" aria-hidden />
+        <p className="text-sm text-surface-400">
+          Ask your manager for a login. Accounts are created on the Staff screen.
+        </p>
+        <div
+          className="pointer-events-none absolute -right-24 -top-24 size-96 rounded-full bg-accent-500/20 blur-3xl"
+          aria-hidden
+        />
+        <div
+          className="pointer-events-none absolute -bottom-32 -left-16 size-96 rounded-full bg-accent-500/10 blur-3xl"
+          aria-hidden
+        />
       </div>
 
       {/* Login panel */}
       <div className="flex items-center justify-center p-6">
-        <div className="w-full max-w-sm">
+        <form onSubmit={submit} className="w-full max-w-sm">
           <div className="mb-8 text-center lg:text-left">
             <h2 className="font-display text-3xl font-semibold">Sign in</h2>
-            <p className="mt-1 text-sm text-ink-500">Choose your role, then enter your PIN.</p>
+            <p className="mt-1 text-sm text-ink-500">Use the username your manager gave you.</p>
           </div>
 
-          <div className="mb-6 grid grid-cols-2 gap-3">
-            {users.map((u) => {
-              const Icon = u.role === 'kitchen' ? ChefHat : ShieldCheck
-              const active = selected?.id === u.id
-              return (
-                <button
-                  key={u.id}
-                  type="button"
-                  onClick={() => {
-                    setSelected(u)
-                    setPin('')
-                    setError(false)
-                  }}
-                  className={cn(
-                    'flex flex-col items-center gap-2 rounded-card border-2 bg-white p-5 transition-colors',
-                    active ? 'border-accent-500 shadow-card' : 'border-surface-200 hover:border-surface-300',
-                  )}
-                >
-                  <Icon className={cn('size-7', active ? 'text-accent-600' : 'text-ink-500')} />
-                  <span className="text-sm font-bold">{u.name}</span>
-                  <span className="text-xs capitalize text-ink-500">{u.role}</span>
-                </button>
-              )
-            })}
-          </div>
+          <label className="mb-4 block">
+            <span className="mb-1.5 block text-sm font-bold text-ink-700">Username</span>
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              inputMode="text"
+              disabled={busy}
+              className="h-12 w-full rounded-control border-2 border-surface-200 bg-white px-3.5 text-[15px] font-semibold outline-none transition-colors focus:border-accent-500 disabled:opacity-60"
+              placeholder="ramesh"
+            />
+          </label>
 
-          {/* PIN dots */}
-          <div className="mb-4 flex justify-center gap-3" aria-label="PIN entry" role="status">
-            {[0, 1, 2, 3].map((i) => (
-              <span
-                key={i}
-                className={cn(
-                  'size-3.5 rounded-full border-2 transition-colors',
-                  error
-                    ? 'border-danger-600 bg-danger-100'
-                    : i < pin.length
-                      ? 'border-accent-500 bg-accent-500'
-                      : 'border-surface-300 bg-white',
-                )}
+          <label className="mb-2 block">
+            <span className="mb-1.5 block text-sm font-bold text-ink-700">Password</span>
+            <span className="relative block">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                disabled={busy}
+                className="h-12 w-full rounded-control border-2 border-surface-200 bg-white pl-3.5 pr-12 text-[15px] font-semibold outline-none transition-colors focus:border-accent-500 disabled:opacity-60"
+                placeholder="••••••••"
               />
-            ))}
-          </div>
-          {error && <p className="mb-3 text-center text-sm font-semibold text-danger-600">Wrong PIN, try again</p>}
-
-          <div className="grid grid-cols-3 gap-2">
-            {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
               <button
-                key={d}
                 type="button"
-                onClick={() => pressDigit(d)}
-                disabled={!selected}
-                className="h-14 rounded-xl bg-white text-lg font-bold shadow-card transition-colors hover:bg-surface-50 disabled:opacity-40"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                className="absolute inset-y-0 right-0 grid w-12 place-items-center text-ink-500 transition-colors hover:text-ink-700"
               >
-                {d}
+                {showPassword ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
               </button>
-            ))}
-            <span aria-hidden />
-            <button
-              type="button"
-              onClick={() => pressDigit('0')}
-              disabled={!selected}
-              className="h-14 rounded-xl bg-white text-lg font-bold shadow-card transition-colors hover:bg-surface-50 disabled:opacity-40"
-            >
-              0
-            </button>
-            <button
-              type="button"
-              onClick={() => setPin((p) => p.slice(0, -1))}
-              disabled={!selected || pin.length === 0}
-              aria-label="Delete digit"
-              className="grid h-14 place-items-center rounded-xl bg-white shadow-card transition-colors hover:bg-surface-50 disabled:opacity-40"
-            >
-              <Delete className="size-5" />
-            </button>
+            </span>
+          </label>
+
+          <div aria-live="polite" className="min-h-[1.75rem]">
+            {error && <p className="py-1 text-sm font-semibold text-danger-600">{error}</p>}
           </div>
+
+          <button
+            type="submit"
+            disabled={busy || !authReady || !username.trim() || !password}
+            className={cn(
+              'mt-1 flex h-12 w-full items-center justify-center gap-2 rounded-control bg-accent-600 text-[15px] font-bold text-white shadow-accent transition-colors',
+              'hover:bg-accent-700 disabled:cursor-not-allowed disabled:opacity-50',
+            )}
+          >
+            {busy ? (
+              <>
+                <LoaderCircle className="size-5 animate-spin" />
+                Signing in
+              </>
+            ) : (
+              <>
+                <LogIn className="size-5" />
+                Sign in
+              </>
+            )}
+          </button>
 
           <p className="mt-6 text-center text-xs text-ink-500">
-            Demo PINs — Manager: 1234 · Kitchen: 5678
+            Forgot your password? Your manager can set a new one for you on the Staff screen.
           </p>
-        </div>
+        </form>
       </div>
     </div>
   )

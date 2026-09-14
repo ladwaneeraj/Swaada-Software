@@ -1,22 +1,24 @@
 import type {
   CafeTable,
   Category,
-  DBSnapshot,
   ID,
   ItemAvailability,
   MenuItem,
   ModifierGroup,
   ModifierOption,
   Station,
-  User,
 } from '@/types'
 
 /**
- * Seed data for the mock database. This file is DATA, not UI: nothing in
- * here is referenced by name from any component. Replacing this with rows
- * from Supabase/PostgreSQL later requires no UI changes.
+ * The starting catalogue for a NEW outlet.
  *
- * Prices, prep times and flags are sample values for the prototype.
+ * This file is DATA, not UI: nothing in it is referenced by name from any
+ * component. It is read once, by the bootstrap script, which writes these
+ * rows into Firestore when an outlet is first created. After that the
+ * manager edits the menu in the app and this file is never consulted again —
+ * so changing a price here does not change a price in a running cafe.
+ *
+ * Prices, prep times and flags are sensible starting values, not gospel.
  */
 
 const SEEDED_AT = '2026-08-31T04:00:00.000Z'
@@ -25,46 +27,38 @@ const stamp = { createdAt: SEEDED_AT, updatedAt: SEEDED_AT }
 /* ------------------------------- Stations ------------------------------ */
 
 const stations: Station[] = [
-  { id: 'st-kitchen', name: 'Kitchen', icon: '🍳', displayOrder: 1, isActive: true },
-  { id: 'st-beverage', name: 'Beverage Counter', icon: '☕', displayOrder: 2, isActive: true },
-  { id: 'st-juice', name: 'Juice Counter', icon: '🍊', displayOrder: 3, isActive: true },
-  { id: 'st-pizza', name: 'Pizza Station', icon: '🍕', displayOrder: 4, isActive: true },
-  { id: 'st-hot', name: 'Hot Kitchen', icon: '🍝', displayOrder: 5, isActive: true },
-  { id: 'st-dessert', name: 'Dessert Counter', icon: '🍰', displayOrder: 6, isActive: true },
-  // Packaged goods are picked off the shelf, not cooked, but they still route
-  // through a station so the ticket tells staff where to get them.
-  { id: 'st-counter', name: 'Front Counter', icon: '🧾', displayOrder: 7, isActive: true },
+  { id: 'st-kitchen', name: 'Kitchen', icon: '🍳', displayOrder: 1, isActive: true, preparesFood: true },
+  { id: 'st-hot', name: 'Hot Kitchen', icon: '🍜', displayOrder: 2, isActive: true, preparesFood: true },
+  { id: 'st-pizza', name: 'Pizza Station', icon: '🍕', displayOrder: 3, isActive: true, preparesFood: true },
+  { id: 'st-beverage', name: 'Beverage Counter', icon: '☕', displayOrder: 4, isActive: true, preparesFood: true },
+  { id: 'st-juice', name: 'Juice Counter', icon: '🍊', displayOrder: 5, isActive: true, preparesFood: true },
+  // Handed over, not made: these never reach the kitchen board.
+  { id: 'st-counter', name: 'Front Counter', icon: '🧾', displayOrder: 6, isActive: true, preparesFood: false },
 ]
 
 /* ------------------------------ Categories ----------------------------- */
 
 const categories: Category[] = [
-  { id: 'cat-hot-beverages', name: 'Hot Beverages', icon: '☕', description: 'Teas, coffees and comforting cups', displayOrder: 1, isActive: true, ...stamp },
-  { id: 'cat-cold-beverages', name: 'Cold Beverages', icon: '🧊', description: 'Coolers, shakes and iced classics', displayOrder: 2, isActive: true, ...stamp },
-  { id: 'cat-fresh-juices', name: 'Fresh Juices', icon: '🥤', description: 'Pressed fresh at the juice counter', displayOrder: 3, isActive: true, ...stamp },
-  { id: 'cat-sandwiches', name: 'Sandwiches', icon: '🥪', description: 'Grilled and stacked to order', displayOrder: 4, isActive: true, ...stamp },
-  { id: 'cat-wraps', name: 'Wraps', icon: '🌯', description: 'Soft tortillas, house sauces', displayOrder: 5, isActive: true, ...stamp },
-  { id: 'cat-pizza', name: 'Pizza', icon: '🍕', description: 'Hand-stretched, three sizes', displayOrder: 6, isActive: true, ...stamp },
-  { id: 'cat-pasta', name: 'Pasta', icon: '🍝', description: 'Tossed fresh in the hot kitchen', displayOrder: 7, isActive: true, ...stamp },
-  { id: 'cat-quick-bites', name: 'Quick Bites', icon: '🍟', description: 'Fries, breads and snacky things', displayOrder: 8, isActive: true, ...stamp },
-  { id: 'cat-burgers', name: 'Burgers', icon: '🍔', description: 'Toasted buns, crisp patties', displayOrder: 9, isActive: true, ...stamp },
-  { id: 'cat-light-bites', name: 'Light Bites', icon: '🥗', description: 'Salads and fresh bowls', displayOrder: 10, isActive: true, ...stamp },
-  { id: 'cat-desserts', name: 'Desserts', icon: '🍰', description: 'Baked, frozen and indulgent', displayOrder: 11, isActive: true, ...stamp },
-  { id: 'cat-counter', name: 'Counter', icon: '🧾', description: 'Bottled water and packaged counter sales', displayOrder: 12, isActive: true, ...stamp },
+  { id: 'cat-maggi', name: 'Maggi', icon: '🍜', description: 'Instant noodles, nine ways', displayOrder: 1, isActive: true, ...stamp },
+  { id: 'cat-sandwich', name: 'Sandwich', icon: '🥪', description: 'Grilled to order', displayOrder: 2, isActive: true, ...stamp },
+  { id: 'cat-bread-toast', name: 'Bread Toast', icon: '🍞', description: 'Toasted and topped', displayOrder: 3, isActive: true, ...stamp },
+  { id: 'cat-pizza', name: 'Pizza', icon: '🍕', description: 'Hand made, baked fresh', displayOrder: 4, isActive: true, ...stamp },
+  { id: 'cat-wrap', name: 'Wrap', icon: '🌯', description: 'Rolled with house fillings', displayOrder: 5, isActive: true, ...stamp },
+  { id: 'cat-sweet-corn', name: 'Sweet Corn', icon: '🌽', description: 'Steamed corn, four seasonings', displayOrder: 6, isActive: true, ...stamp },
+  { id: 'cat-snacks', name: 'Fries & Snacks', icon: '🍟', description: 'Fried to order', displayOrder: 7, isActive: true, ...stamp },
+  { id: 'cat-hot-beverages', name: 'Hot Beverages', icon: '☕', description: 'Teas and coffees', displayOrder: 8, isActive: true, ...stamp },
+  { id: 'cat-cold-beverages', name: 'Cold Beverages', icon: '🧊', description: 'Iced and cold', displayOrder: 9, isActive: true, ...stamp },
+  { id: 'cat-milkshakes', name: 'Milk Shakes', icon: '🥤', description: 'Thick shakes, blended fresh', displayOrder: 10, isActive: true, ...stamp },
+  { id: 'cat-juices', name: 'Juices', icon: '🍹', description: 'Pressed at the counter', displayOrder: 11, isActive: true, ...stamp },
+  { id: 'cat-soda', name: 'Soda', icon: '🫧', description: 'Fizzy coolers', displayOrder: 12, isActive: true, ...stamp },
+  { id: 'cat-cigarettes', name: 'Cigarettes', icon: '🚬', description: 'Sold per stick at the counter', displayOrder: 13, isActive: true, ...stamp },
+  { id: 'cat-counter', name: 'Counter', icon: '🧾', description: 'Packaged counter sales', displayOrder: 14, isActive: true, ...stamp },
 ]
 
 /* --------------------------- Modifier groups --------------------------- */
 
 const modifierGroups: ModifierGroup[] = [
-  { id: 'grp-pizza-size', name: 'Size', selectionType: 'single', required: true, minSelections: 1, maxSelections: 1, displayOrder: 1 },
-  { id: 'grp-pasta-portion', name: 'Portion', selectionType: 'single', required: true, minSelections: 1, maxSelections: 1, displayOrder: 1 },
-  { id: 'grp-shake-flavor', name: 'Flavour', selectionType: 'single', required: true, minSelections: 1, maxSelections: 1, displayOrder: 1 },
-  { id: 'grp-extras', name: 'Extras', selectionType: 'multi', required: false, minSelections: 0, maxSelections: 3, displayOrder: 2 },
-  { id: 'grp-extras-nonveg', name: 'Non-veg Extras', selectionType: 'multi', required: false, minSelections: 0, maxSelections: 2, displayOrder: 3 },
-  { id: 'grp-spice', name: 'Spice Level', selectionType: 'single', required: false, minSelections: 0, maxSelections: 1, displayOrder: 4 },
-  { id: 'grp-food-prefs', name: 'Preferences', selectionType: 'multi', required: false, minSelections: 0, maxSelections: 4, displayOrder: 5 },
-  { id: 'grp-bev-prefs', name: 'Preferences', selectionType: 'multi', required: false, minSelections: 0, maxSelections: 3, displayOrder: 5 },
-  { id: 'grp-dessert-addons', name: 'Add-ons', selectionType: 'multi', required: false, minSelections: 0, maxSelections: 2, displayOrder: 2 },
+  { id: 'grp-extra-cheese', name: 'Extras', selectionType: 'multi', required: false, minSelections: 0, maxSelections: 1, displayOrder: 1 },
 ]
 
 function opt(
@@ -78,47 +72,16 @@ function opt(
   return { id, modifierGroupId: group, name, priceAdjustment, isAvailable: true, isDefault, displayOrder }
 }
 
-const modifierOptions: ModifierOption[] = [
-  opt('grp-pizza-size', 'mo-size-regular', 'Regular', 0, 1, true),
-  opt('grp-pizza-size', 'mo-size-medium', 'Medium', 100, 2),
-  opt('grp-pizza-size', 'mo-size-large', 'Large', 200, 3),
-
-  opt('grp-pasta-portion', 'mo-portion-half', 'Half', 0, 1, true),
-  opt('grp-pasta-portion', 'mo-portion-full', 'Full', 70, 2),
-
-  opt('grp-shake-flavor', 'mo-shake-chocolate', 'Chocolate', 0, 1, true),
-  opt('grp-shake-flavor', 'mo-shake-vanilla', 'Vanilla', 0, 2),
-  opt('grp-shake-flavor', 'mo-shake-strawberry', 'Strawberry', 0, 3),
-  opt('grp-shake-flavor', 'mo-shake-oreo', 'Oreo', 20, 4),
-
-  opt('grp-extras', 'mo-extra-cheese', 'Extra Cheese', 30, 1),
-  opt('grp-extras', 'mo-extra-paneer', 'Extra Paneer', 40, 2),
-  opt('grp-extras', 'mo-extra-sauce', 'Extra Sauce', 20, 3),
-
-  opt('grp-extras-nonveg', 'mo-extra-chicken', 'Extra Chicken', 60, 1),
-
-  opt('grp-spice', 'mo-spice-mild', 'Mild', 0, 1),
-  opt('grp-spice', 'mo-spice-medium', 'Medium', 0, 2),
-  opt('grp-spice', 'mo-spice-spicy', 'Extra Spicy', 0, 3),
-
-  opt('grp-food-prefs', 'mo-no-onion', 'No Onion', 0, 1),
-  opt('grp-food-prefs', 'mo-no-cheese', 'No Cheese', 0, 2),
-  opt('grp-food-prefs', 'mo-no-mayo', 'No Mayo', 0, 3),
-
-  opt('grp-bev-prefs', 'mo-less-sugar', 'Less Sugar', 0, 1),
-  opt('grp-bev-prefs', 'mo-no-sugar', 'No Sugar', 0, 2),
-  opt('grp-bev-prefs', 'mo-no-ice', 'No Ice', 0, 3),
-
-  opt('grp-dessert-addons', 'mo-icesurface-scoop', 'Ice Cream Scoop', 40, 1),
-  opt('grp-dessert-addons', 'mo-choc-sauce', 'Chocolate Sauce', 20, 2),
-]
+/* The board lists exactly one paid add-on, on Maggi, Sandwich and Pizza. */
+const modifierOptions: ModifierOption[] = [opt('grp-extra-cheese', 'mo-extra-cheese', 'Extra Cheese', 20, 1)]
 
 /* ------------------------------ Menu items ----------------------------- */
 
 interface ItemSeed {
   id: string
   name: string
-  desc: string
+  /** Optional: the board carries no descriptions, so most items have none. */
+  desc?: string
   price: number
   veg?: boolean
   prep?: number
@@ -142,36 +105,24 @@ interface CategoryDefaults {
  * URL (or edit it in Menu management) and the UI picks it up unchanged.
  */
 const ITEM_IMAGES: Record<string, string[]> = {
-  chai: ['itm-tea', 'itm-masala-tea', 'itm-ginger-tea', 'itm-black-tea'],
-  'tea-cup': ['itm-green-tea', 'itm-lemon-tea'],
-  'filter-coffee': ['itm-coffee', 'itm-filter-coffee'],
-  espresso: ['itm-espresso'],
-  cappuccino: ['itm-cappuccino', 'itm-cafe-latte', 'itm-cafe-mocha'],
-  'hot-chocolate': ['itm-hot-chocolate'],
-  'cold-coffee': ['itm-cold-coffee', 'itm-iced-coffee', 'itm-cold-chocolate'],
-  'iced-tea': ['itm-iced-tea'],
-  soda: ['itm-lemon-soda', 'itm-sweet-lime-soda'],
-  mojito: ['itm-mint-cooler', 'itm-mojito'],
-  milkshake: ['itm-milkshake'],
-  'juice-orange': ['itm-orange-juice', 'itm-mosambi-juice', 'itm-pineapple-juice', 'itm-mixed-fruit-juice', 'itm-carrot-juice'],
-  'juice-red': ['itm-watermelon-juice', 'itm-pomegranate-juice', 'itm-grape-juice'],
-  sandwich: ['itm-veg-sandwich', 'itm-cheese-sandwich', 'itm-grilled-sandwich', 'itm-club-sandwich', 'itm-paneer-sandwich', 'itm-corn-cheese-sandwich', 'itm-chicken-sandwich', 'itm-chicken-club-sandwich'],
-  wrap: ['itm-veg-wrap', 'itm-paneer-wrap', 'itm-mexican-wrap', 'itm-cheese-wrap', 'itm-chicken-wrap', 'itm-chicken-tikka-wrap'],
-  pizza: ['itm-margherita-pizza', 'itm-veg-pizza', 'itm-paneer-pizza', 'itm-farmhouse-pizza', 'itm-corn-cheese-pizza', 'itm-chicken-pizza', 'itm-chicken-tikka-pizza'],
-  pasta: ['itm-white-sauce-pasta', 'itm-red-sauce-pasta', 'itm-pink-sauce-pasta', 'itm-alfredo-pasta', 'itm-arrabbiata-pasta', 'itm-veg-pasta', 'itm-paneer-pasta', 'itm-chicken-pasta'],
-  fries: ['itm-french-fries', 'itm-peri-peri-fries', 'itm-cheese-fries', 'itm-potato-wedges'],
-  'garlic-bread': ['itm-garlic-bread', 'itm-cheese-garlic-bread'],
-  nachos: ['itm-nachos', 'itm-cheese-nachos'],
-  snacks: ['itm-onion-rings', 'itm-veg-nuggets', 'itm-chicken-nuggets', 'itm-chicken-popcorn'],
-  burger: ['itm-veg-burger', 'itm-cheese-burger', 'itm-paneer-burger', 'itm-crispy-chicken-burger', 'itm-chicken-cheese-burger'],
-  salad: ['itm-veg-salad', 'itm-chicken-salad', 'itm-corn-salad', 'itm-paneer-salad'],
-  'fruit-bowl': ['itm-fruit-bowl', 'itm-fruit-cream'],
-  brownie: ['itm-brownie', 'itm-brownie-icecream'],
-  cake: ['itm-chocolate-cake', 'itm-pastry'],
-  cheesecake: ['itm-cheesecake'],
-  'ice-cream': ['itm-ice-cream', 'itm-sundae'],
-  'water-bottle': ['itm-water-500', 'itm-water-1l', 'itm-water-chilled'],
-  cigarette: ['itm-cigarette-single', 'itm-cigarette-pack'],
+  'pasta': ['itm-maggi-plain', 'itm-maggi-mixveg', 'itm-maggi-sweet-corn', 'itm-maggi-schezwan', 'itm-maggi-paneer', 'itm-maggi-cheesy', 'itm-maggi-cheesy-corn', 'itm-maggi-cheesy-paneer', 'itm-maggi-cheesy-schezwan'],
+  'sandwich': ['itm-sandwich-mixveg', 'itm-sandwich-sweet-corn', 'itm-sandwich-schezwan', 'itm-sandwich-gujrathi', 'itm-sandwich-punjabi', 'itm-sandwich-paneer', 'itm-sandwich-paprica', 'itm-sandwich-jalapeno', 'itm-sandwich-pizza', 'itm-sandwich-spcl-paneer', 'itm-sandwich-bombay', 'itm-sandwich-shahi'],
+  'garlic-bread': ['itm-bread-toast-masala', 'itm-bread-toast-sweetcorn', 'itm-bread-toast-paneer', 'itm-bread-toast-schezwan', 'itm-bread-toast-cheesy-corn', 'itm-bread-toast-cheesy-paneer', 'itm-bread-toast-cheesy'],
+  'pizza': ['itm-pizza-sweet-corn', 'itm-pizza-olive', 'itm-pizza-jalapeno', 'itm-pizza-paprica', 'itm-pizza-paneer'],
+  'wrap': ['itm-wrap-mixveg', 'itm-wrap-sweet-corn', 'itm-wrap-schezwan', 'itm-wrap-gujrathi', 'itm-wrap-punjabi', 'itm-wrap-paneer', 'itm-wrap-paprica', 'itm-wrap-jalapeno', 'itm-wrap-olive', 'itm-wrap-bombay', 'itm-wrap-pizza'],
+  'nachos': ['itm-sweet-corn-salt', 'itm-sweet-corn-salt-and-pepper', 'itm-sweet-corn-indian-spicy', 'itm-sweet-corn-peri-peri'],
+  'milkshake': ['itm-milk-shake-strawberry', 'itm-milk-shake-mango', 'itm-milk-shake-pink-guava', 'itm-milk-shake-custard-apple', 'itm-milk-shake-chikoo', 'itm-milk-shake-tender-coconut', 'itm-milk-shake-chocolate', 'itm-milk-shake-mixfruit', 'itm-milk-shake-anjeer'],
+  'soda': ['itm-soda-lemon', 'itm-soda-jaljeera', 'itm-soda-pudina', 'itm-soda-ginger', 'itm-soda-chilli-guava', 'itm-soda-mojito-mint'],
+  'cigarette': ['itm-lites', 'itm-king', 'itm-ice-burst', 'itm-double-burst', 'itm-milds', 'itm-ultra-milds', 'itm-forest', 'itm-fuse-beyond', 'itm-red', 'itm-advance', 'itm-gold', 'itm-clove', 'itm-black-filter', 'itm-fine-touch', 'itm-connect', 'itm-shift', 'itm-american-club', 'itm-social'],
+  'fries': ['itm-french-fries-salty', 'itm-french-fries-salt-and-pepper', 'itm-french-fries-indian-spicy', 'itm-french-fries-peri-peri'],
+  'snacks': ['itm-potato-shots-10-pcs', 'itm-momos-4-pcs', 'itm-veg-roll-3-pcs', 'itm-corn-triangle-5-pcs', 'itm-onion-rings-5-pcs', 'itm-cutlet-5-pcs', 'itm-samosa', 'itm-pocket-pizza-3-pcs'],
+  'chai': ['itm-tea', 'itm-ginger-tea', 'itm-masala-tea', 'itm-green-tea', 'itm-lime-tea'],
+  'filter-coffee': ['itm-coffee', 'itm-black-coffee'],
+  'hot-chocolate': ['itm-badam', 'itm-horlicks'],
+  'cold-coffee': ['itm-ice-coffee', 'itm-cold-coffee', 'itm-cold-horlicks', 'itm-cold-boost', 'itm-ice-boost', 'itm-ice-badam', 'itm-cold-badam'],
+  'juice-orange': ['itm-juice-lemon', 'itm-juice-passion-fruit'],
+  'juice-red': ['itm-juice-jamun'],
+  'water-bottle': ['itm-water-bottle'],
 }
 
 const imageByItemId = new Map<string, string>()
@@ -202,7 +153,7 @@ function buildItems(categoryId: ID, defaults: CategoryDefaults, seeds: ItemSeed[
     id: s.id,
     categoryId,
     name: s.name,
-    description: s.desc,
+    description: s.desc ?? '',
     image: photoByItemId.get(s.id) ?? imageByItemId.get(s.id) ?? null,
     basePrice: s.price,
     availability: s.availability ?? 'available',
@@ -218,202 +169,231 @@ function buildItems(categoryId: ID, defaults: CategoryDefaults, seeds: ItemSeed[
   }))
 }
 
+const maggi = buildItems(
+  'cat-maggi',
+  { station: 'st-hot', prep: 8, mods: ['grp-extra-cheese'] },
+  [
+    { id: 'itm-maggi-plain', name: 'Maggi Plain', price: 60 },
+    { id: 'itm-maggi-mixveg', name: 'Maggi Mixveg', price: 70 },
+    { id: 'itm-maggi-sweet-corn', name: 'Maggi Sweet Corn', price: 80 },
+    { id: 'itm-maggi-schezwan', name: 'Maggi Schezwan', price: 80 },
+    { id: 'itm-maggi-paneer', name: 'Maggi Paneer', price: 90 },
+    { id: 'itm-maggi-cheesy', name: 'Maggi Cheesy', price: 90 },
+    { id: 'itm-maggi-cheesy-corn', name: 'Maggi Cheesy Corn', price: 100 },
+    { id: 'itm-maggi-cheesy-paneer', name: 'Maggi Cheesy Paneer', price: 100 },
+    { id: 'itm-maggi-cheesy-schezwan', name: 'Maggi Cheesy Schezwan', price: 100 },
+  ],
+)
+
+const sandwich = buildItems(
+  'cat-sandwich',
+  { station: 'st-kitchen', prep: 7, mods: ['grp-extra-cheese'] },
+  [
+    { id: 'itm-sandwich-mixveg', name: 'Sandwich Mixveg', price: 70 },
+    { id: 'itm-sandwich-sweet-corn', name: 'Sandwich Sweet Corn', price: 80 },
+    { id: 'itm-sandwich-schezwan', name: 'Sandwich Schezwan', price: 80 },
+    { id: 'itm-sandwich-gujrathi', name: 'Sandwich Gujrathi', price: 80 },
+    { id: 'itm-sandwich-punjabi', name: 'Sandwich Punjabi', price: 80 },
+    { id: 'itm-sandwich-paneer', name: 'Sandwich Paneer', price: 90 },
+    { id: 'itm-sandwich-paprica', name: 'Sandwich Paprica', price: 80 },
+    { id: 'itm-sandwich-jalapeno', name: 'Sandwich Jalapeno', price: 90 },
+    { id: 'itm-sandwich-pizza', name: 'Sandwich Pizza', price: 110 },
+    { id: 'itm-sandwich-spcl-paneer', name: 'Sandwich Spcl Paneer', price: 110 },
+    { id: 'itm-sandwich-bombay', name: 'Sandwich Bombay', price: 130 },
+    { id: 'itm-sandwich-shahi', name: 'Sandwich Shahi', price: 130 },
+  ],
+)
+
+const breadToast = buildItems(
+  'cat-bread-toast',
+  { station: 'st-kitchen', prep: 5, mods: [] },
+  [
+    { id: 'itm-bread-toast-masala', name: 'Bread Toast Masala', price: 50 },
+    { id: 'itm-bread-toast-sweetcorn', name: 'Bread Toast Sweetcorn', price: 60 },
+    { id: 'itm-bread-toast-paneer', name: 'Bread Toast Paneer', price: 70 },
+    { id: 'itm-bread-toast-schezwan', name: 'Bread Toast Schezwan', price: 80 },
+    { id: 'itm-bread-toast-cheesy-corn', name: 'Bread Toast Cheesy Corn', price: 80 },
+    { id: 'itm-bread-toast-cheesy-paneer', name: 'Bread Toast Cheesy Paneer', price: 80 },
+    { id: 'itm-bread-toast-cheesy', name: 'Bread Toast Cheesy', price: 70 },
+  ],
+)
+
+const pizza = buildItems(
+  'cat-pizza',
+  { station: 'st-pizza', prep: 15, mods: ['grp-extra-cheese'] },
+  [
+    { id: 'itm-pizza-sweet-corn', name: 'Pizza Sweet Corn', price: 160 },
+    { id: 'itm-pizza-olive', name: 'Pizza Olive', price: 170 },
+    { id: 'itm-pizza-jalapeno', name: 'Pizza Jalapeno', price: 170 },
+    { id: 'itm-pizza-paprica', name: 'Pizza Paprica', price: 180 },
+    { id: 'itm-pizza-paneer', name: 'Pizza Paneer', price: 200 },
+  ],
+)
+
+const wrap = buildItems(
+  'cat-wrap',
+  { station: 'st-kitchen', prep: 8, mods: [] },
+  [
+    { id: 'itm-wrap-mixveg', name: 'Wrap Mixveg', price: 80 },
+    { id: 'itm-wrap-sweet-corn', name: 'Wrap Sweet Corn', price: 90 },
+    { id: 'itm-wrap-schezwan', name: 'Wrap Schezwan', price: 90 },
+    { id: 'itm-wrap-gujrathi', name: 'Wrap Gujrathi', price: 90 },
+    { id: 'itm-wrap-punjabi', name: 'Wrap Punjabi', price: 90 },
+    { id: 'itm-wrap-paneer', name: 'Wrap Paneer', price: 100 },
+    { id: 'itm-wrap-paprica', name: 'Wrap Paprica', price: 100 },
+    { id: 'itm-wrap-jalapeno', name: 'Wrap Jalapeno', price: 100 },
+    { id: 'itm-wrap-olive', name: 'Wrap Olive', price: 100 },
+    { id: 'itm-wrap-bombay', name: 'Wrap Bombay', price: 120 },
+    { id: 'itm-wrap-pizza', name: 'Wrap Pizza', price: 120 },
+  ],
+)
+
+const sweetCorn = buildItems(
+  'cat-sweet-corn',
+  { station: 'st-kitchen', prep: 5, mods: [] },
+  [
+    { id: 'itm-sweet-corn-salt', name: 'Sweet Corn Salt', price: 60 },
+    { id: 'itm-sweet-corn-salt-and-pepper', name: 'Sweet Corn Salt & Pepper', price: 60 },
+    { id: 'itm-sweet-corn-indian-spicy', name: 'Sweet Corn Indian Spicy', price: 60 },
+    { id: 'itm-sweet-corn-peri-peri', name: 'Sweet Corn Peri Peri', price: 60 },
+  ],
+)
+
+const friesSnacks = buildItems(
+  'cat-snacks',
+  { station: 'st-kitchen', prep: 8, mods: [] },
+  [
+    { id: 'itm-french-fries-salty', name: 'French Fries Salty', price: 110 },
+    { id: 'itm-french-fries-salt-and-pepper', name: 'French Fries Salt & Pepper', price: 120 },
+    { id: 'itm-french-fries-indian-spicy', name: 'French Fries Indian Spicy', price: 120 },
+    { id: 'itm-french-fries-peri-peri', name: 'French Fries Peri-Peri', price: 130 },
+    { id: 'itm-potato-shots-10-pcs', name: 'Potato Shots (10 pcs)', price: 130 },
+    { id: 'itm-momos-4-pcs', name: 'Momos (4 pcs)', price: 130 },
+    { id: 'itm-veg-roll-3-pcs', name: 'Veg Roll (3 pcs)', price: 130 },
+    { id: 'itm-corn-triangle-5-pcs', name: 'Corn Triangle (5 pcs)', price: 130 },
+    { id: 'itm-onion-rings-5-pcs', name: 'Onion Rings (5 pcs)', price: 130 },
+    { id: 'itm-cutlet-5-pcs', name: 'Cutlet (5 pcs)', price: 130 },
+    { id: 'itm-samosa', name: 'Samosa', price: 130 },
+    { id: 'itm-pocket-pizza-3-pcs', name: 'Pocket Pizza (3 pcs)', price: 130 },
+  ],
+)
+
 const hotBeverages = buildItems(
   'cat-hot-beverages',
-  { station: 'st-beverage', prep: 4, mods: ['grp-bev-prefs'] },
+  { station: 'st-beverage', prep: 4, mods: [] },
   [
-    { id: 'itm-tea', name: 'Tea', desc: 'Classic chai, brewed strong with milk', price: 20, prep: 3, tags: ['chai'] },
-    { id: 'itm-masala-tea', name: 'Masala Tea', desc: 'Chai simmered with crushed spices', price: 25, prep: 4, popular: true, tags: ['chai'] },
-    { id: 'itm-ginger-tea', name: 'Ginger Tea', desc: 'Sharp fresh ginger in strong chai', price: 25, prep: 4 },
-    { id: 'itm-lemon-tea', name: 'Lemon Tea', desc: 'Light black tea with a squeeze of lemon', price: 30, prep: 3 },
-    { id: 'itm-green-tea', name: 'Green Tea', desc: 'Delicate, steeped just right', price: 35, prep: 3 },
-    { id: 'itm-black-tea', name: 'Black Tea', desc: 'No milk, full flavour', price: 20, prep: 3 },
-    { id: 'itm-coffee', name: 'Coffee', desc: 'House milk coffee, hot and quick', price: 30, prep: 3 },
-    { id: 'itm-filter-coffee', name: 'Filter Coffee', desc: 'South Indian decoction, frothed in brass', price: 40, prep: 5, recommended: true },
-    { id: 'itm-cappuccino', name: 'Cappuccino', desc: 'Espresso with a deep foam cap', price: 90, prep: 5, popular: true, tags: ['coffee'] },
-    { id: 'itm-cafe-latte', name: 'Café Latte', desc: 'Mellow espresso with steamed milk', price: 100, prep: 5, tags: ['coffee', 'latte'] },
-    { id: 'itm-cafe-mocha', name: 'Café Mocha', desc: 'Espresso meets chocolate and milk', price: 120, prep: 6, tags: ['coffee', 'mocha'] },
-    { id: 'itm-espresso', name: 'Espresso', desc: 'A short, intense single shot', price: 70, prep: 3, tags: ['coffee'] },
-    { id: 'itm-hot-chocolate', name: 'Hot Chocolate', desc: 'Melted chocolate, steamed milk, cocoa dust', price: 110, prep: 6 },
+    { id: 'itm-coffee', name: 'Coffee', price: 20 },
+    { id: 'itm-tea', name: 'Tea', price: 20 },
+    { id: 'itm-badam', name: 'Badam', price: 20 },
+    { id: 'itm-horlicks', name: 'Horlicks', price: 20 },
+    { id: 'itm-ginger-tea', name: 'Ginger Tea', price: 25 },
+    { id: 'itm-masala-tea', name: 'Masala Tea', price: 25 },
+    { id: 'itm-green-tea', name: 'Green Tea', price: 25 },
+    { id: 'itm-black-coffee', name: 'Black Coffee', price: 25 },
+    { id: 'itm-lime-tea', name: 'Lime Tea', price: 25 },
   ],
 )
 
 const coldBeverages = buildItems(
   'cat-cold-beverages',
-  { station: 'st-beverage', prep: 5, mods: ['grp-bev-prefs'] },
+  { station: 'st-beverage', prep: 5, mods: [] },
   [
-    { id: 'itm-cold-coffee', name: 'Cold Coffee', desc: 'Blended coffee, chilled and creamy', price: 120, popular: true },
-    { id: 'itm-cold-chocolate', name: 'Cold Chocolate', desc: 'Chocolate shake with a cocoa rim', price: 130 },
-    { id: 'itm-iced-coffee', name: 'Iced Coffee', desc: 'Chilled brew over ice, lightly sweet', price: 110 },
-    { id: 'itm-iced-tea', name: 'Iced Tea', desc: 'Lemon iced tea, brewed in-house', price: 90 },
-    { id: 'itm-lemon-soda', name: 'Lemon Soda', desc: 'Fresh lime, soda, salt or sweet', price: 60, prep: 3 },
-    { id: 'itm-sweet-lime-soda', name: 'Sweet Lime Soda', desc: 'Mosambi juice topped with soda', price: 70, prep: 3 },
-    { id: 'itm-mint-cooler', name: 'Mint Cooler', desc: 'Crushed mint, lime and crushed ice', price: 80 },
-    { id: 'itm-mojito', name: 'Mojito', desc: 'Virgin mojito with mint and lime', price: 90, recommended: true },
-    { id: 'itm-milkshake', name: 'Milkshake', desc: 'Thick shake in your pick of flavour', price: 140, prep: 6, mods: ['grp-shake-flavor', 'grp-dessert-addons', 'grp-bev-prefs'] },
+    { id: 'itm-ice-coffee', name: 'Ice Coffee', price: 25 },
+    { id: 'itm-ice-boost', name: 'Ice Boost', price: 25 },
+    { id: 'itm-ice-badam', name: 'Ice Badam', price: 25 },
+    { id: 'itm-cold-coffee', name: 'Cold Coffee', price: 80 },
+    { id: 'itm-cold-horlicks', name: 'Cold Horlicks', price: 80 },
+    { id: 'itm-cold-boost', name: 'Cold Boost', price: 80 },
+    { id: 'itm-cold-badam', name: 'Cold Badam', price: 80 },
   ],
 )
 
-const freshJuices = buildItems(
-  'cat-fresh-juices',
-  { station: 'st-juice', prep: 4, mods: ['grp-bev-prefs'] },
+const milkShakes = buildItems(
+  'cat-milkshakes',
+  { station: 'st-beverage', prep: 6, mods: [] },
   [
-    { id: 'itm-orange-juice', name: 'Orange Juice', desc: 'Pressed sweet oranges, no water added', price: 90, popular: true },
-    { id: 'itm-watermelon-juice', name: 'Watermelon Juice', desc: 'Cold-pressed, naturally sweet', price: 70 },
-    { id: 'itm-pineapple-juice', name: 'Pineapple Juice', desc: 'Tangy-sweet, pressed to order', price: 80 },
-    { id: 'itm-mosambi-juice', name: 'Mosambi Juice', desc: 'Sweet lime, gentle and fresh', price: 80 },
-    { id: 'itm-pomegranate-juice', name: 'Pomegranate Juice', desc: 'Deep red, pressed whole arils', price: 110, recommended: true },
-    { id: 'itm-grape-juice', name: 'Grape Juice', desc: 'Dark grapes, lightly chilled', price: 80 },
-    { id: 'itm-mixed-fruit-juice', name: 'Mixed Fruit Juice', desc: 'Seasonal fruits blended together', price: 100 },
-    { id: 'itm-carrot-juice', name: 'Carrot Juice', desc: 'Earthy-sweet with a ginger hint', price: 70 },
+    { id: 'itm-milk-shake-strawberry', name: 'Milk Shake Strawberry', price: 100 },
+    { id: 'itm-milk-shake-mango', name: 'Milk Shake Mango', price: 100 },
+    { id: 'itm-milk-shake-pink-guava', name: 'Milk Shake Pink Guava', price: 100 },
+    { id: 'itm-milk-shake-custard-apple', name: 'Milk Shake Custard Apple', price: 100 },
+    { id: 'itm-milk-shake-chikoo', name: 'Milk Shake Chikoo', price: 100 },
+    { id: 'itm-milk-shake-tender-coconut', name: 'Milk Shake Tender Coconut', price: 100 },
+    { id: 'itm-milk-shake-chocolate', name: 'Milk Shake Chocolate', price: 100 },
+    { id: 'itm-milk-shake-mixfruit', name: 'Milk Shake Mixfruit', price: 100 },
+    { id: 'itm-milk-shake-anjeer', name: 'Milk Shake Anjeer', price: 100 },
   ],
 )
 
-const sandwiches = buildItems(
-  'cat-sandwiches',
-  { station: 'st-kitchen', prep: 8, mods: ['grp-extras', 'grp-spice', 'grp-food-prefs'] },
+const juices = buildItems(
+  'cat-juices',
+  { station: 'st-juice', prep: 5, mods: [] },
   [
-    { id: 'itm-veg-sandwich', name: 'Veg Sandwich', desc: 'Cucumber, tomato, onion and chutney', price: 80, prep: 6, popular: true },
-    { id: 'itm-cheese-sandwich', name: 'Cheese Sandwich', desc: 'Double cheese on soft white bread', price: 100, prep: 6 },
-    { id: 'itm-grilled-sandwich', name: 'Grilled Sandwich', desc: 'Veg and cheese, pressed till crisp', price: 110 },
-    { id: 'itm-club-sandwich', name: 'Club Sandwich', desc: 'Triple-decker with veg, cheese and egg-free mayo', price: 140 },
-    { id: 'itm-paneer-sandwich', name: 'Paneer Sandwich', desc: 'Spiced paneer filling, grilled', price: 120 },
-    { id: 'itm-corn-cheese-sandwich', name: 'Corn & Cheese Sandwich', desc: 'Sweet corn folded into melted cheese', price: 120 },
-    { id: 'itm-chicken-sandwich', name: 'Chicken Sandwich', desc: 'Shredded chicken, herbed mayo', price: 140, veg: false, mods: ['grp-extras', 'grp-extras-nonveg', 'grp-spice', 'grp-food-prefs'] },
-    { id: 'itm-chicken-club-sandwich', name: 'Chicken Club Sandwich', desc: 'Triple-decker with grilled chicken', price: 170, veg: false, recommended: true, mods: ['grp-extras', 'grp-extras-nonveg', 'grp-spice', 'grp-food-prefs'] },
+    { id: 'itm-juice-lemon', name: 'Juice Lemon', price: 50 },
+    { id: 'itm-juice-jamun', name: 'Juice Jamun', price: 100 },
+    { id: 'itm-juice-passion-fruit', name: 'Juice Passion Fruit', price: 100 },
   ],
 )
 
-const wraps = buildItems(
-  'cat-wraps',
-  { station: 'st-kitchen', prep: 8, mods: ['grp-extras', 'grp-spice', 'grp-food-prefs'] },
+const soda = buildItems(
+  'cat-soda',
+  { station: 'st-juice', prep: 3, mods: [] },
   [
-    { id: 'itm-veg-wrap', name: 'Veg Wrap', desc: 'Crunchy veg and house sauce in a soft tortilla', price: 100 },
-    { id: 'itm-paneer-wrap', name: 'Paneer Wrap', desc: 'Grilled paneer, vegetables and house sauce', price: 140, popular: true },
-    { id: 'itm-mexican-wrap', name: 'Mexican Wrap', desc: 'Beans, corn, salsa and cheese', price: 130 },
-    { id: 'itm-cheese-wrap', name: 'Cheese Wrap', desc: 'Melted cheese with peppers and onion', price: 120 },
-    { id: 'itm-chicken-wrap', name: 'Chicken Wrap', desc: 'Grilled chicken with garlic mayo', price: 160, veg: false, mods: ['grp-extras', 'grp-extras-nonveg', 'grp-spice', 'grp-food-prefs'] },
-    { id: 'itm-chicken-tikka-wrap', name: 'Chicken Tikka Wrap', desc: 'Smoky tikka chunks, mint chutney', price: 180, veg: false, popular: true, mods: ['grp-extras', 'grp-extras-nonveg', 'grp-spice', 'grp-food-prefs'] },
+    { id: 'itm-soda-lemon', name: 'Soda Lemon', price: 60 },
+    { id: 'itm-soda-jaljeera', name: 'Soda Jaljeera', price: 60 },
+    { id: 'itm-soda-pudina', name: 'Soda Pudina', price: 60 },
+    { id: 'itm-soda-ginger', name: 'Soda Ginger', price: 60 },
+    { id: 'itm-soda-chilli-guava', name: 'Soda Chilli Guava', price: 60 },
+    { id: 'itm-soda-mojito-mint', name: 'Soda Mojito Mint', price: 60 },
   ],
 )
 
-const pizzas = buildItems(
-  'cat-pizza',
-  { station: 'st-pizza', prep: 15, mods: ['grp-pizza-size', 'grp-extras', 'grp-spice'] },
+const cigarettes = buildItems(
+  'cat-cigarettes',
+  { station: 'st-counter', prep: 1, mods: [] },
   [
-    { id: 'itm-margherita-pizza', name: 'Margherita Pizza', desc: 'Tomato base, mozzarella, basil', price: 149, popular: true },
-    { id: 'itm-veg-pizza', name: 'Veg Pizza', desc: 'Capsicum, onion, tomato and olives', price: 179 },
-    { id: 'itm-paneer-pizza', name: 'Paneer Pizza', desc: 'Spiced paneer with onion and capsicum', price: 209 },
-    { id: 'itm-farmhouse-pizza', name: 'Farmhouse Pizza', desc: 'Loaded garden veg on a cheesy base', price: 219, recommended: true },
-    { id: 'itm-corn-cheese-pizza', name: 'Corn & Cheese Pizza', desc: 'Sweet corn under a cheese blanket', price: 199 },
-    { id: 'itm-chicken-pizza', name: 'Chicken Pizza', desc: 'Herbed chicken and mozzarella', price: 229, veg: false, mods: ['grp-pizza-size', 'grp-extras', 'grp-extras-nonveg', 'grp-spice'] },
-    { id: 'itm-chicken-tikka-pizza', name: 'Chicken Tikka Pizza', desc: 'Tikka chicken, onion, coriander', price: 249, veg: false, popular: true, mods: ['grp-pizza-size', 'grp-extras', 'grp-extras-nonveg', 'grp-spice'] },
+    { id: 'itm-lites', name: 'Lites', price: 26 },
+    { id: 'itm-king', name: 'King', price: 26 },
+    { id: 'itm-ice-burst', name: 'Ice Burst', price: 26 },
+    { id: 'itm-double-burst', name: 'Double Burst', price: 26 },
+    { id: 'itm-milds', name: 'Milds', price: 26 },
+    { id: 'itm-ultra-milds', name: 'Ultra Milds', price: 26 },
+    { id: 'itm-forest', name: 'Forest', price: 26 },
+    { id: 'itm-fuse-beyond', name: 'Fuse Beyond', price: 26 },
+    { id: 'itm-red', name: 'Red', price: 26 },
+    { id: 'itm-advance', name: 'Advance', price: 26 },
+    { id: 'itm-gold', name: 'Gold', price: 26 },
+    { id: 'itm-clove', name: 'Clove', price: 26 },
+    { id: 'itm-black-filter', name: 'Black Filter', price: 26 },
+    { id: 'itm-fine-touch', name: 'Fine Touch', price: 25 },
+    { id: 'itm-connect', name: 'Connect', price: 23 },
+    { id: 'itm-shift', name: 'Shift', price: 23 },
+    { id: 'itm-american-club', name: 'American Club', price: 23 },
+    { id: 'itm-social', name: 'Social', price: 23 },
   ],
 )
 
-const pastas = buildItems(
-  'cat-pasta',
-  { station: 'st-hot', prep: 12, mods: ['grp-pasta-portion', 'grp-extras', 'grp-spice'] },
-  [
-    { id: 'itm-white-sauce-pasta', name: 'White Sauce Pasta', desc: 'Creamy béchamel with garlic and herbs', price: 120, popular: true },
-    { id: 'itm-red-sauce-pasta', name: 'Red Sauce Pasta', desc: 'Slow-cooked tomato and basil', price: 110 },
-    { id: 'itm-pink-sauce-pasta', name: 'Pink Sauce Pasta', desc: 'Best of both sauces, folded together', price: 125 },
-    { id: 'itm-alfredo-pasta', name: 'Alfredo Pasta', desc: 'Rich parmesan cream sauce', price: 135 },
-    { id: 'itm-arrabbiata-pasta', name: 'Arrabbiata Pasta', desc: 'Fiery tomato sauce with chilli flakes', price: 125 },
-    { id: 'itm-veg-pasta', name: 'Veg Pasta', desc: 'Tossed with sautéed garden vegetables', price: 110 },
-    { id: 'itm-paneer-pasta', name: 'Paneer Pasta', desc: 'Paneer cubes in a masala-tinged sauce', price: 140 },
-    { id: 'itm-chicken-pasta', name: 'Chicken Pasta', desc: 'Grilled chicken in your choice of sauce', price: 155, veg: false, mods: ['grp-pasta-portion', 'grp-extras', 'grp-extras-nonveg', 'grp-spice'] },
-  ],
-)
-
-const quickBites = buildItems(
-  'cat-quick-bites',
-  { station: 'st-kitchen', prep: 8, mods: ['grp-spice'] },
-  [
-    { id: 'itm-french-fries', name: 'French Fries', desc: 'Crisp, salted, always hot', price: 90, popular: true, tags: ['chips'] },
-    { id: 'itm-peri-peri-fries', name: 'Peri Peri Fries', desc: 'Tossed in peri peri spice mix', price: 110 },
-    { id: 'itm-cheese-fries', name: 'Cheese Fries', desc: 'Fries under molten cheese sauce', price: 130 },
-    { id: 'itm-garlic-bread', name: 'Garlic Bread', desc: 'Buttery garlic loaf, toasted', price: 100 },
-    { id: 'itm-cheese-garlic-bread', name: 'Cheese Garlic Bread', desc: 'Garlic bread with a cheese pull', price: 130 },
-    { id: 'itm-potato-wedges', name: 'Potato Wedges', desc: 'Chunky, herbed and golden', price: 110 },
-    { id: 'itm-nachos', name: 'Nachos', desc: 'Corn chips with salsa and dip', price: 120 },
-    { id: 'itm-cheese-nachos', name: 'Cheese Nachos', desc: 'Loaded with cheese sauce and jalapeños', price: 150 },
-    { id: 'itm-onion-rings', name: 'Onion Rings', desc: 'Crisp battered rings with dip', price: 100 },
-    { id: 'itm-veg-nuggets', name: 'Veg Nuggets', desc: 'Golden veg bites, 8 pieces', price: 120 },
-    { id: 'itm-chicken-nuggets', name: 'Chicken Nuggets', desc: 'Crumb-fried chicken bites, 8 pieces', price: 150, veg: false },
-    { id: 'itm-chicken-popcorn', name: 'Chicken Popcorn', desc: 'Bite-size crispy chicken', price: 160, veg: false },
-  ],
-)
-
-const burgers = buildItems(
-  'cat-burgers',
-  { station: 'st-kitchen', prep: 10, mods: ['grp-extras', 'grp-food-prefs'] },
-  [
-    { id: 'itm-veg-burger', name: 'Veg Burger', desc: 'Spiced veg patty, lettuce, house sauce', price: 90 },
-    { id: 'itm-cheese-burger', name: 'Cheese Burger', desc: 'Veg patty with a cheese slice', price: 110 },
-    { id: 'itm-paneer-burger', name: 'Paneer Burger', desc: 'Crisp paneer steak, mint mayo', price: 130, recommended: true },
-    { id: 'itm-crispy-chicken-burger', name: 'Crispy Chicken Burger', desc: 'Crunchy fried chicken thigh', price: 140, veg: false, popular: true, mods: ['grp-extras', 'grp-extras-nonveg', 'grp-food-prefs'] },
-    { id: 'itm-chicken-cheese-burger', name: 'Chicken Cheese Burger', desc: 'Fried chicken with melted cheese', price: 160, veg: false, availability: 'out_of_stock', mods: ['grp-extras', 'grp-extras-nonveg', 'grp-food-prefs'] },
-  ],
-)
-
-const lightBites = buildItems(
-  'cat-light-bites',
-  { station: 'st-kitchen', prep: 6, mods: ['grp-food-prefs'] },
-  [
-    { id: 'itm-veg-salad', name: 'Veg Salad', desc: 'Crunchy garden veg, lemon dressing', price: 100 },
-    { id: 'itm-chicken-salad', name: 'Chicken Salad', desc: 'Grilled chicken over fresh greens', price: 150, veg: false },
-    { id: 'itm-fruit-bowl', name: 'Fruit Bowl', desc: 'Seasonal fruit, chaat masala on the side', price: 90 },
-    { id: 'itm-corn-salad', name: 'Corn Salad', desc: 'Buttered corn, peppers, herbs', price: 100 },
-    { id: 'itm-paneer-salad', name: 'Paneer Salad', desc: 'Grilled paneer with greens and seeds', price: 130 },
-  ],
-)
-
-const desserts = buildItems(
-  'cat-desserts',
-  { station: 'st-dessert', prep: 4, mods: [] },
-  [
-    { id: 'itm-brownie', name: 'Brownie', desc: 'Dense, fudgy, baked in-house', price: 90, mods: ['grp-dessert-addons'] },
-    { id: 'itm-brownie-icecream', name: 'Brownie with Ice Cream', desc: 'Warm brownie, vanilla scoop, chocolate sauce', price: 140, popular: true },
-    { id: 'itm-chocolate-cake', name: 'Chocolate Cake', desc: 'Layered chocolate sponge slice', price: 110 },
-    { id: 'itm-cheesecake', name: 'Cheesecake', desc: 'Baked cheesecake, biscuit base', price: 150, recommended: true },
-    { id: 'itm-pastry', name: 'Pastry', desc: 'Cream pastry of the day', price: 80 },
-    { id: 'itm-ice-cream', name: 'Ice Cream', desc: 'Two scoops, ask for flavours', price: 70, mods: ['grp-dessert-addons'] },
-    { id: 'itm-sundae', name: 'Sundae', desc: 'Scoops, nuts, sauces, the works', price: 130 },
-    { id: 'itm-fruit-cream', name: 'Fruit Cream', desc: 'Fresh fruit folded into sweet cream', price: 100 },
-  ],
-)
-
-/**
- * Counter sales: bottled water and packaged goods the café hands over rather
- * than cooks. Prices and names are sample values — edit them in Menu
- * management. Tobacco is an age-restricted sale; the POS records it like any
- * other line and the staff still do the age check at the counter.
- */
 const counter = buildItems(
   'cat-counter',
   { station: 'st-counter', prep: 1, mods: [] },
   [
-    { id: 'itm-water-500', name: 'Water Bottle 500 ml', desc: 'Sealed packaged drinking water', price: 20, popular: true, tags: ['water', 'bottle'] },
-    { id: 'itm-water-1l', name: 'Water Bottle 1 L', desc: 'Sealed packaged drinking water, large', price: 40, tags: ['water', 'bottle'] },
-    { id: 'itm-water-chilled', name: 'Chilled Water 500 ml', desc: 'Straight from the fridge', price: 25, tags: ['water', 'bottle', 'cold'] },
-    { id: 'itm-cigarette-single', name: 'Cigarette (single)', desc: 'Sold per stick at the counter', price: 20, tags: ['smoke', 'tobacco'] },
-    { id: 'itm-cigarette-pack', name: 'Cigarette (pack)', desc: 'Full pack, price varies by brand', price: 380, tags: ['smoke', 'tobacco'] },
+    { id: 'itm-water-bottle', name: 'Water Bottle', price: 20 },
   ],
 )
 
 const items: MenuItem[] = [
+  ...maggi,
+  ...sandwich,
+  ...breadToast,
+  ...pizza,
+  ...wrap,
+  ...sweetCorn,
+  ...friesSnacks,
   ...hotBeverages,
   ...coldBeverages,
-  ...freshJuices,
-  ...sandwiches,
-  ...wraps,
-  ...pizzas,
-  ...pastas,
-  ...quickBites,
-  ...burgers,
-  ...lightBites,
-  ...desserts,
+  ...milkShakes,
+  ...juices,
+  ...soda,
+  ...cigarettes,
   ...counter,
 ]
 
@@ -438,43 +418,32 @@ const tables: CafeTable[] = [
   table('tbl-g6', 'G6', 'Garden', 8, 12),
 ]
 
-/* -------------------------------- Users -------------------------------- */
+/* ----------------------------- Seed payload ---------------------------- */
 
-const users: User[] = [
-  { id: 'usr-admin', name: 'Manager', role: 'admin', pin: '1234' },
-  { id: 'usr-kitchen', name: 'Kitchen Crew', role: 'kitchen', pin: '5678' },
-]
+/**
+ * Everything a new outlet starts with. Modifier options are handed back
+ * flat here and nested into their group by the bootstrap script, matching
+ * how they are stored.
+ */
+export interface SeedCatalogue {
+  stations: Station[]
+  categories: Category[]
+  items: MenuItem[]
+  modifierGroups: ModifierGroup[]
+  modifierOptions: ModifierOption[]
+  tables: CafeTable[]
+  /** Where order and bill numbering starts for a brand new outlet. */
+  sequences: { nextOrderNumber: number; nextBillNumber: number }
+}
 
-/* ------------------------------- Snapshot ------------------------------ */
-
-export function seedSnapshot(): DBSnapshot {
+export function seedCatalogue(): SeedCatalogue {
   return structuredClone({
-    schemaVersion: 7,
+    stations,
     categories,
     items,
     modifierGroups,
     modifierOptions,
-    stations,
     tables,
-    orders: [],
-    bills: [],
-    customers: [],
-    walletEntries: [],
-    users,
-    settings: {
-      cafeName: 'Swaada Café',
-      currency: 'INR' as const,
-      askCustomerInfo: true,
-      wallet: {
-        allowPayLater: true,
-      },
-      sound: {
-        newOrderAlert: true,
-        volume: 0.8,
-        repeatUntilAcknowledged: true,
-        repeatSeconds: 25,
-      },
-    },
-    counters: { nextOrderNumber: 1042, nextBillNumber: 501 },
+    sequences: { nextOrderNumber: 1, nextBillNumber: 1 },
   })
 }

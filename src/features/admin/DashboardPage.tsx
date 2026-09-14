@@ -154,8 +154,8 @@ export function DashboardPage() {
         <Card className="p-5 lg:col-span-2">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-base font-bold">Live orders</h2>
-            <Link to="/admin/orders" className="text-sm font-semibold text-accent-600 hover:underline">
-              Open orders board
+            <Link to="/admin/tables" className="text-sm font-semibold text-accent-600 hover:underline">
+              Open the floor
             </Link>
           </div>
           {activeOrders.length === 0 ? (
@@ -167,7 +167,7 @@ export function DashboardPage() {
                 return (
                   <li key={order.id}>
                     <Link
-                      to={`/admin/orders?focus=${order.id}`}
+                      to="/admin/tables"
                       className="flex items-center justify-between gap-3 py-3 hover:bg-surface-50"
                     >
                       <div className="min-w-0">

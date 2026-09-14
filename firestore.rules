@@ -1,0 +1,320 @@
+rules_version = '2';
+
+/**
+ * Swaada POS security rules.
+ *
+ * These are the real permission system. The client also hides screens a role
+ * should not see, but that is courtesy, not security: anyone can edit the
+ * JavaScript. What actually stops a kitchen login reading the day's takings
+ * is this file, enforced by Firestore on every request.
+ *
+ * WHERE THE ROLE COMES FROM
+ *
+ * From the staff DOCUMENT, read here with get(). The alternative — a custom
+ * claim baked into the auth token — costs nothing to check, but claims can
+ * only be written by the Admin SDK, which means Cloud Functions, which means
+ * a paid Firebase plan. This app runs on the free plan, so it pays one
+ * document read per request instead.
+ *
+ * That trade is not purely a loss. A role change or a switch-off lands on
+ * the NEXT REQUEST, because the rule re-reads the document every time. With
+ * claims, a demoted manager keeps their old powers until their token
+ * refreshes, which can be the better part of an hour.
+ *
+ * Rules access calls are cached within one request, so a request touching
+ * several rules still reads the staff document once, not once per rule.
+ *
+ * The other job these rules do is enforce the ORDER STATE MACHINE. The app
+ * writes with batches rather than transactions so it keeps working offline,
+ * which means it cannot re-check state at write time. These rules do that
+ * check instead: a settled round can never be edited, so two devices cannot
+ * both settle the same table and write two bills.
+ */
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /* --------------------------- Identity --------------------------- */
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function staffPath(outletId) {
+      return /databases/$(database)/documents/outlets/$(outletId)/staff/$(request.auth.uid);
+    }
+
+    /** Any staff member of THIS outlet, not switched off. */
+    function staff(outletId) {
+      return signedIn()
+        && exists(staffPath(outletId))
+        && get(staffPath(outletId)).data.isActive == true;
+    }
+
+    function role(outletId) {
+      return get(staffPath(outletId)).data.role;
+    }
+
+    function isAdmin(outletId) {
+      return staff(outletId) && role(outletId) == 'admin';
+    }
+
+    function isKitchen(outletId) {
+      return staff(outletId) && role(outletId) == 'kitchen';
+    }
+
+    /**
+     * Anyone who handles money: the manager and the counter. This is the
+     * line the kitchen does not cross — bills, guests and wallets are all
+     * gated on it, so a tablet on a wall in the kitchen cannot be used to
+     * read what the café took today.
+     */
+    function isFloor(outletId) {
+      return isAdmin(outletId) || (staff(outletId) && role(outletId) == 'counter');
+    }
+
+    /** The staff member stamped on a record must be the one writing it. */
+    function stampedBySelf(field) {
+      return request.resource.data[field] == request.auth.uid;
+    }
+
+    function unchanged(field) {
+      return request.resource.data[field] == resource.data[field];
+    }
+
+    /* ------------------ Login bootstrap, outside outlets ------------- */
+
+    /**
+     * Which outlet a uid belongs to. A freshly signed-in browser must read
+     * this BEFORE it knows which outlet path it may look in, so it cannot
+     * itself be gated on outlet membership — hence "your own, and only
+     * yours". It deliberately holds no role, so reading it grants nothing.
+     */
+    match /staffIndex/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if isAdmin(request.resource.data.outletId);
+      allow update: if isAdmin(resource.data.outletId)
+        && isAdmin(request.resource.data.outletId);
+      allow delete: if isAdmin(resource.data.outletId);
+    }
+
+    /**
+     * Claimed usernames, keyed by the username. A manager has to be able to
+     * check one is free before creating a login, and a browser cannot ask
+     * Firebase Auth whether an account exists.
+     *
+     * Readable by any signed-in user, which in this app means any staff
+     * member. That does leak "is this username taken" to staff, which is the
+     * same thing the login screen leaks to anyone anyway, and is the price
+     * of not burning a real auth account on every typo.
+     *
+     * A claim is never reassigned: no update rule. If a login is replaced,
+     * the new one takes a NEW username and the old claim stays put, so a
+     * retired username can never be handed to someone else and inherit the
+     * trail of the person who had it.
+     */
+    match /usernames/{username} {
+      allow read: if signedIn();
+      allow create: if isAdmin(request.resource.data.outletId);
+      allow update, delete: if false;
+    }
+
+    /* ---------------------------- Outlet ---------------------------- */
+
+    match /outlets/{outletId} {
+
+      // Outlets are created by the bootstrap script through the Admin SDK,
+      // which bypasses these rules. No client ever creates or edits one.
+      allow read: if staff(outletId);
+      allow write: if false;
+
+      /* ------------------------ The catalogue ----------------------- */
+      /* Everyone reads it — the kitchen needs station names, the counter
+         needs prices. Only a manager changes it.                       */
+
+      match /categories/{docId} {
+        allow read: if staff(outletId);
+        allow write: if isAdmin(outletId);
+      }
+
+      match /items/{docId} {
+        allow read: if staff(outletId);
+        allow write: if isAdmin(outletId);
+      }
+
+      match /modifierGroups/{docId} {
+        allow read: if staff(outletId);
+        allow write: if isAdmin(outletId);
+      }
+
+      match /stations/{docId} {
+        allow read: if staff(outletId);
+        allow write: if isAdmin(outletId);
+      }
+
+      match /tables/{docId} {
+        allow read: if staff(outletId);
+        allow write: if isAdmin(outletId);
+      }
+
+      /* -------------------------- Settings -------------------------- */
+
+      match /meta/settings {
+        allow read: if staff(outletId);
+        allow write: if isAdmin(outletId);
+      }
+
+      /**
+       * Number allocation. The counter has to be able to reserve a block of
+       * bill numbers, so this is writable by the floor rather than admin
+       * only. The value is a high-water mark, not money.
+       */
+      match /meta/sequences {
+        allow read, write: if isFloor(outletId);
+      }
+
+      /* --------------------------- Staff ---------------------------- */
+
+      /**
+       * This document IS the person's role, so who may write it is the most
+       * load-bearing rule in the file.
+       *
+       * Only a manager of this outlet. A counter login trying to promote
+       * itself is refused because the check reads the CURRENT document,
+       * which still says counter — the write it is attempting cannot vouch
+       * for itself.
+       *
+       * A manager also cannot demote or switch OFF THEMSELVES. That is not
+       * paternalism: it is the one edit that can leave a café with no way
+       * back into its own till. Hand the role over first, then step down.
+       */
+      match /staff/{uid} {
+        allow read: if isAdmin(outletId) || (staff(outletId) && request.auth.uid == uid);
+
+        allow create: if isAdmin(outletId)
+          && request.resource.data.outletId == outletId
+          && request.resource.data.role in ['admin', 'counter', 'kitchen'];
+
+        allow update: if isAdmin(outletId)
+          && unchanged('outletId')
+          && unchanged('username')
+          && request.resource.data.role in ['admin', 'counter', 'kitchen']
+          && !(
+            request.auth.uid == uid
+            && (request.resource.data.role != 'admin' || request.resource.data.isActive != true)
+          );
+
+        // Switched off, never deleted: rounds and bills carry their name.
+        allow delete: if false;
+      }
+
+      /* --------------------------- Orders --------------------------- */
+
+      match /orders/{orderId} {
+        allow read: if staff(outletId);
+
+        allow create: if isFloor(outletId)
+          && stampedBySelf('createdByUserId')
+          && request.resource.data.businessDate is string
+          && request.resource.data.orderNumber is number
+          && request.resource.data.status in ['placed', 'delivered'];
+
+        /**
+         * The state machine, enforced server-side.
+         *
+         * A settled round is frozen: that single clause is what makes the
+         * offline settle path safe, because a second device trying to close
+         * the same table has its whole batch rejected instead of writing a
+         * duplicate bill.
+         *
+         * The kitchen may move cooking forward and nothing else. It cannot
+         * touch the total, the number, the table, or the bill link — so a
+         * compromised kitchen tablet cannot discount a bill to zero.
+         */
+        allow update: if resource.data.status != 'settled'
+          && resource.data.status != 'cancelled'
+          && unchanged('orderNumber')
+          && unchanged('businessDate')
+          && (
+            isFloor(outletId)
+            || (
+              isKitchen(outletId)
+              && unchanged('total')
+              && unchanged('tableId')
+              && unchanged('groupNo')
+              && request.resource.data.status in ['placed', 'preparing', 'ready', 'delivered']
+              && !('billId' in request.resource.data)
+            )
+          );
+
+        // Rounds are cancelled, never deleted. History has to stay readable.
+        allow delete: if false;
+      }
+
+      /* --------------------------- Bills ---------------------------- */
+
+      /**
+       * A bill is written once and never touched again. There is no update
+       * rule and no delete rule, for anyone, including the manager — a
+       * receipt that can be edited after the fact is not a receipt. A wrong
+       * bill is corrected by a wallet adjustment, which leaves a trail.
+       */
+      match /bills/{billId} {
+        allow read: if isFloor(outletId);
+        allow create: if isFloor(outletId)
+          && stampedBySelf('settledByUserId')
+          && request.resource.data.businessDate is string
+          && request.resource.data.billNumber is number
+          && request.resource.data.total >= 0;
+        allow update, delete: if false;
+      }
+
+      /* ------------------------- Guests ----------------------------- */
+
+      match /customers/{customerId} {
+        allow read: if isFloor(outletId);
+        allow create, update: if isFloor(outletId);
+        // Guests are not deleted: bills point at them.
+        allow delete: if false;
+      }
+
+      /**
+       * The wallet ledger is APPEND ONLY. No update, no delete, not even for
+       * a manager. A balance is the signed sum of these rows, so allowing an
+       * edit here would mean a guest's balance could be changed without
+       * anything showing that it had been. Corrections are new rows of kind
+       * 'adjustment', which carry a required note and an audit entry.
+       */
+      match /walletEntries/{entryId} {
+        allow read: if isFloor(outletId);
+        allow create: if isFloor(outletId)
+          && stampedBySelf('byUserId')
+          && request.resource.data.businessDate is string
+          && request.resource.data.amount is number;
+        allow update, delete: if false;
+      }
+
+      /* ------------------------ Audit log --------------------------- */
+
+      /**
+       * Any staff member can add to it — that is how their actions get
+       * recorded. Only a manager can read it. Nobody can change or remove an
+       * entry, which is the only property that makes a log worth keeping.
+       */
+      match /auditLog/{entryId} {
+        allow read: if isAdmin(outletId);
+        allow create: if staff(outletId) && stampedBySelf('byUserId');
+        allow update, delete: if false;
+      }
+
+      /* -------------------------- Devices --------------------------- */
+
+      match /devices/{deviceId} {
+        allow read, write: if staff(outletId);
+      }
+
+      /* Anything not named above is denied. Adding a collection means
+         adding a rule for it here, on purpose, rather than inheriting
+         access by accident. */
+    }
+  }
+}

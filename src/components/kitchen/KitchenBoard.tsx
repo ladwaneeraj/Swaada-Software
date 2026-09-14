@@ -3,9 +3,9 @@ import { useMemo, useRef, useState } from 'react'
 import { Badge, VegMark } from '@/components/ui'
 import { cn, elapsedLabel, minutesSince } from '@/lib/utils'
 import { useNow } from '@/lib/useNow'
-import { isKitchenActiveOrder, kitchenService, orderService } from '@/services'
+import { isKitchenActiveOrder, kitchenItems, kitchenService, orderService } from '@/services'
 import { useAppStore } from '@/store/useAppStore'
-import type { Order, OrderItem } from '@/types'
+import type { Order, OrderItem, Station } from '@/types'
 
 /**
  * The kitchen board, shared by the standalone Kitchen screen and the
@@ -15,6 +15,7 @@ import type { Order, OrderItem } from '@/types'
 
 export function KitchenBoard({ dark = false }: { dark?: boolean }) {
   const orders = useAppStore((s) => s.db.orders)
+  const stations = useAppStore((s) => s.db.stations)
   const now = useNow()
 
   const lanes = useMemo(() => {
@@ -31,17 +32,17 @@ export function KitchenBoard({ dark = false }: { dark?: boolean }) {
     <div className="grid h-full min-h-0 gap-4 lg:grid-cols-3">
       <Lane title="New orders" count={lanes.incoming.length} tone="info" dark={dark}>
         {lanes.incoming.map((o) => (
-          <Ticket key={o.id} order={o} now={now} dark={dark} />
+          <Ticket key={o.id} order={o} stations={stations} now={now} dark={dark} />
         ))}
       </Lane>
       <Lane title="Preparing" count={lanes.preparing.length} tone="warn" dark={dark}>
         {lanes.preparing.map((o) => (
-          <Ticket key={o.id} order={o} now={now} dark={dark} />
+          <Ticket key={o.id} order={o} stations={stations} now={now} dark={dark} />
         ))}
       </Lane>
       <Lane title="Ready · take to table" count={lanes.waiting.length} tone="ok" dark={dark}>
         {lanes.waiting.map((o) => (
-          <Ticket key={o.id} order={o} now={now} dark={dark} />
+          <Ticket key={o.id} order={o} stations={stations} now={now} dark={dark} />
         ))}
       </Lane>
     </div>
@@ -87,20 +88,31 @@ function Lane({
   )
 }
 
-function Ticket({ order, now, dark }: { order: Order; now: number; dark: boolean }) {
+function Ticket({
+  order,
+  stations,
+  now,
+  dark,
+}: {
+  order: Order
+  stations: Station[]
+  now: number
+  dark: boolean
+}) {
   const mins = minutesSince(order.placedAt, now)
   const urgency = mins >= 15 ? 'text-danger-600' : mins >= 8 ? 'text-warn-600' : dark ? 'text-surface-300' : 'text-ink-500'
 
   // Group items by station so a future multi-station kitchen can split this
   // ticket; today one screen shows all stations with a tag per group.
+  const cooked = useMemo(() => kitchenItems(order, stations), [order, stations])
   const byStation = useMemo(() => {
     const map = new Map<string, OrderItem[]>()
-    order.items.forEach((i) => map.set(i.stationName, [...(map.get(i.stationName) ?? []), i]))
+    cooked.forEach((i) => map.set(i.stationName, [...(map.get(i.stationName) ?? []), i]))
     return [...map.entries()]
-  }, [order.items])
+  }, [cooked])
 
-  const readyCount = order.items.filter((i) => i.status === 'ready').length
-  const activeCount = order.items.filter((i) => i.status !== 'cancelled').length
+  const readyCount = cooked.filter((i) => i.status === 'ready').length
+  const activeCount = cooked.filter((i) => i.status !== 'cancelled').length
 
   return (
     <article className={cn('rise-in overflow-hidden rounded-card bg-white shadow-card', order.status === 'ready' && 'ring-2 ring-ok-600')}>
@@ -110,9 +122,17 @@ function Ticket({ order, now, dark }: { order: Order; now: number; dark: boolean
           order.status === 'ready' ? 'bg-ok-100' : 'bg-surface-100',
         )}
       >
-        <div className="flex items-baseline gap-2">
+        {/* Who this is for. A table can seat three parties at once, so the
+            table alone is not enough to carry the plate to. */}
+        <div className="flex min-w-0 items-baseline gap-2">
           <span className="text-lg font-bold tracking-tight">#{order.orderNumber}</span>
-          <span className="rounded-lg bg-ink-900 px-2 py-0.5 text-sm font-bold text-white">{order.tableName}</span>
+          <span className="shrink-0 rounded-lg bg-ink-900 px-2 py-0.5 text-sm font-bold text-white">
+            {order.tableName}
+            {order.groupNo > 1 && <span className="text-white/70"> · {order.groupNo}</span>}
+          </span>
+          {order.customerName && (
+            <span className="min-w-0 truncate text-sm font-semibold text-ink-700">{order.customerName}</span>
+          )}
         </div>
         <span className={cn('flex items-center gap-1 text-sm font-bold tabular-nums', urgency)}>
           <Timer className="size-4" /> {elapsedLabel(order.placedAt, now)}

@@ -1,5 +1,5 @@
-import { ArrowDownLeft, ArrowUpRight, Phone, Scale, UserPlus, Wallet } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { ArrowDownLeft, ArrowUpRight, Phone, Scale, User, UserPlus, Wallet } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useToasts } from '@/components/toast'
 import { Badge, Button, Field, Input, Modal, Segmented, Textarea } from '@/components/ui'
 import { PAYMENT_METHOD_META, WALLET_ENTRY_META } from '@/lib/statusMeta'
@@ -8,15 +8,19 @@ import {
   walletHeld,
   walletOwed,
   customerAccounts,
+  customerProfiles,
   customerService,
   isCompletePhone,
   normalisePhone,
+  queries,
+  walletBalance,
   walletLedger,
   walletService,
 } from '@/services'
+import { toAppError } from '@/lib/errors'
 import { useAppStore } from '@/store/useAppStore'
 import type { CustomerAccount } from '@/services'
-import type { Customer, PaymentMethod } from '@/types'
+import type { Customer, PaymentMethod, WalletEntry } from '@/types'
 import { PAYMENT_METHODS } from '@/types'
 
 /**
@@ -28,7 +32,14 @@ import { PAYMENT_METHODS } from '@/types'
 
 /* ------------------------------- Reading -------------------------------- */
 
-/** Every guest with their visits, spend and account balance. */
+/**
+ * The guests currently SEATED, with their visits, spend and balance.
+ *
+ * This is not every guest the cafe has ever served — that list lives in
+ * Firestore and is queried, not held. The store follows the ledgers of the
+ * people actually sitting in the cafe right now, which is what the floor and
+ * the settle sheet need, and is a handful of records rather than thousands.
+ */
 export function useAccounts(): CustomerAccount[] {
   const customers = useAppStore((s) => s.db.customers)
   const bills = useAppStore((s) => s.db.bills)
@@ -42,6 +53,126 @@ export function useAccounts(): CustomerAccount[] {
 export function useAccount(customerId: string | undefined): CustomerAccount | undefined {
   const accounts = useAccounts()
   return customerId ? accounts.find((a) => a.customer.id === customerId) : undefined
+}
+
+/**
+ * A guest's account whether or not they are seated.
+ *
+ * If they are on the floor, the store already follows their ledger live and
+ * this costs nothing. If they are not — someone walking in to clear an old
+ * due — their ledger and bills are fetched once. A balance is the sum of a
+ * guest's WHOLE ledger, so it has to be the whole thing; there is no useful
+ * partial answer to "what do they owe".
+ */
+export function useGuestAccount(customer: Customer | null): {
+  account: CustomerAccount | undefined
+  loading: boolean
+} {
+  const local = useAccount(customer?.id)
+  const seated = useAppStore((s) => s.db.customers.some((c) => c.id === customer?.id))
+  const [remote, setRemote] = useState<{ id: string; account: CustomerAccount } | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!customer || seated) return
+    let cancelled = false
+    setLoading(true)
+    void Promise.all([queries.ledgerFor(customer.id), queries.billsForCustomer(customer.id)])
+      .then(([entries, bills]) => {
+        if (cancelled) return
+        const profile = customerProfiles(bills)[0]
+        setRemote({
+          id: customer.id,
+          account: {
+            customer,
+            visits: profile?.visits ?? 0,
+            totalSpent: profile?.totalSpent ?? 0,
+            lastVisitAt: profile?.lastVisitAt,
+            balance: walletBalance(entries, customer.id),
+          },
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setRemote(null)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [customer, seated])
+
+  // Derived rather than reset in an effect: a fetched account is only good
+  // for the guest it was fetched for, so tag it with that id and ignore it
+  // the moment the id on screen changes. No clearing render in between.
+  const fetched = remote && customer && remote.id === customer.id ? remote.account : undefined
+  return {
+    account: seated ? local : fetched,
+    loading: loading && !fetched,
+  }
+}
+
+/**
+ * Guest lookup at the counter, against Firestore rather than memory.
+ *
+ * Ten digits is an exact document id, so it is a single get that usually
+ * comes straight from the offline cache for anyone seen before. Four to nine
+ * digits runs a prefix query. Under four, nothing: a cafe's book is not
+ * worth scanning for two digits, and the counter is mid-conversation with a
+ * guest anyway.
+ */
+function useCustomerSearch(phone: string): {
+  match: Customer | null
+  suggestions: Customer[]
+  searching: boolean
+} {
+  const [match, setMatch] = useState<Customer | null>(null)
+  const [suggestions, setSuggestions] = useState<Customer[]>([])
+  const [searching, setSearching] = useState(false)
+  // Rising counter, so a slow early response cannot overwrite a fast later one.
+  const request = useRef(0)
+
+  useEffect(() => {
+    const digits = normalisePhone(phone)
+    const ticket = (request.current += 1)
+
+    if (digits.length < 4) {
+      setMatch(null)
+      setSuggestions([])
+      setSearching(false)
+      return
+    }
+
+    setSearching(true)
+    // Typing ten digits fires ten renders; waiting a moment turns that into
+    // one query instead of seven.
+    const timer = window.setTimeout(() => {
+      const run =
+        digits.length === 10
+          ? customerService.get(digits).then((found) => ({ found, list: [] as Customer[] }))
+          : queries.searchCustomers(digits).then((list) => ({ found: null, list }))
+
+      void run
+        .then(({ found, list }) => {
+          if (ticket !== request.current) return
+          setMatch(found)
+          setSuggestions(list.slice(0, 6))
+        })
+        .catch(() => {
+          if (ticket !== request.current) return
+          setMatch(null)
+          setSuggestions([])
+        })
+        .finally(() => {
+          if (ticket === request.current) setSearching(false)
+        })
+    }, 250)
+
+    return () => window.clearTimeout(timer)
+  }, [phone])
+
+  return { match, suggestions, searching }
 }
 
 /* ------------------------------ Balance pill ----------------------------- */
@@ -94,8 +225,25 @@ export function AccountSummary({ account }: { account: CustomerAccount }) {
 
 /* ------------------------------ The ledger ------------------------------- */
 
-export function WalletHistory({ customer, limit }: { customer: Customer; limit?: number }) {
-  const entries = useAppStore((s) => s.db.walletEntries)
+/**
+ * A guest's account movements.
+ *
+ * `entries` is passed in by screens that have already fetched the guest's
+ * whole ledger; screens showing someone who is seated right now can leave it
+ * out and the live store answers, because the store follows the ledgers of
+ * everyone currently in the cafe.
+ */
+export function WalletHistory({
+  customer,
+  limit,
+  entries: provided,
+}: {
+  customer: Customer
+  limit?: number
+  entries?: WalletEntry[]
+}) {
+  const live = useAppStore((s) => s.db.walletEntries)
+  const entries = provided ?? live
   const ledger = useMemo(() => walletLedger(entries, customer.id), [entries, customer.id])
   const shown = limit ? ledger.slice(0, limit) : ledger
 
@@ -167,12 +315,33 @@ export function CustomerSheet({
   actionLabel?: string
   skipLabel?: string
 }) {
-  const customers = useAppStore((s) => s.db.customers)
   const [phone, setPhone] = useState('')
   const [typedName, setTypedName] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const pushLookupToast = useToasts((s) => s.push)
 
-  const match = customerService.find(customers, phone)
-  const account = useAccount(match?.id)
+  const { match, suggestions: found, searching } = useCustomerSearch(phone)
+  const { account } = useGuestAccount(match)
+
+  /**
+   * Nobody at a counter wants to type ten digits to find a regular. Four is
+   * enough to narrow a small cafe's book down to a handful, and the last four
+   * are what people actually remember — but Firestore can only range over a
+   * PREFIX, so the query matches the start of the number and the rest is
+   * ordered here.
+   */
+  const suggestions = useMemo(
+    () =>
+      found
+        .map((customer) => ({ customer, visits: 0, totalSpent: 0, balance: 0 }) as CustomerAccount)
+        .sort(
+          (a, b) =>
+            Number(b.customer.phone.startsWith(phone)) -
+              Number(a.customer.phone.startsWith(phone)) ||
+            a.customer.name.localeCompare(b.customer.name),
+        ),
+    [found, phone],
+  )
   // The name follows the number until someone edits it, so correcting a
   // spelling sticks but switching numbers never leaves the old name behind.
   const name = typedName ?? match?.name ?? ''
@@ -183,12 +352,19 @@ export function CustomerSheet({
     setTypedName(null)
   }
 
-  const confirm = () => {
-    if (!ready) return
-    const customer = customerService.upsert({ phone, name })
-    if (!customer) return
-    reset()
-    onPick(customer)
+  const confirm = async () => {
+    if (!ready || saving) return
+    setSaving(true)
+    try {
+      const customer = await customerService.upsert({ phone, name })
+      if (!customer) return
+      reset()
+      onPick(customer)
+    } catch (error) {
+      pushLookupToast(toAppError(error, 'Could not save the guest.').userMessage, 'danger')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -237,8 +413,43 @@ export function CustomerSheet({
             aria-label="Customer mobile number"
             className="h-12 text-base font-semibold tracking-wide"
             autoFocus
+            role="combobox"
+            aria-expanded={suggestions.length > 0}
+            aria-controls="guest-suggestions"
           />
         </Field>
+
+        {suggestions.length > 0 && (
+          <ul
+            id="guest-suggestions"
+            role="listbox"
+            aria-label="Matching guests"
+            className="-mt-1 divide-y divide-surface-100 overflow-hidden rounded-card bg-white ring-1 ring-surface-200"
+          >
+            {suggestions.map((a) => (
+              <li key={a.customer.id}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  onClick={() => {
+                    setPhone(a.customer.phone)
+                    setTypedName(null)
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-surface-50"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-bold">{a.customer.name}</span>
+                    <span className="block text-[11px] tabular-nums text-ink-500">
+                      <MatchedPhone phone={a.customer.phone} typed={phone} />
+                    </span>
+                  </span>
+                  <BalancePill balance={a.balance} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
 
         <Field label="Name">
           <Input
@@ -258,6 +469,13 @@ export function CustomerSheet({
               </div>
             )}
           </>
+        ) : searching ? (
+          // The lookup is a query now, not a scan of memory, so there is a
+          // real moment between typing and knowing. Saying so beats
+          // flashing "new guest" at a regular for half a second.
+          <p className="rounded-card bg-surface-100 px-3.5 py-2.5 text-[13px] font-semibold text-ink-500">
+            Looking up this number…
+          </p>
         ) : (
           ready && (
             <p className="rounded-card bg-ok-100 px-3.5 py-2.5 text-[13px] font-semibold text-ok-600">
@@ -267,6 +485,19 @@ export function CustomerSheet({
         )}
       </div>
     </Modal>
+  )
+}
+
+/** The digits that were typed, picked out of the full number. */
+function MatchedPhone({ phone, typed }: { phone: string; typed: string }) {
+  const at = phone.indexOf(typed)
+  if (at === -1) return <>{phone}</>
+  return (
+    <>
+      {phone.slice(0, at)}
+      <b className="text-ink-900">{phone.slice(at, at + typed.length)}</b>
+      {phone.slice(at + typed.length)}
+    </>
   )
 }
 
@@ -310,6 +541,7 @@ export function MoneySheet({
   const [amountText, setAmountText] = useState('')
   const [method, setMethod] = useState<PaymentMethod>('cash')
   const [direction, setDirection] = useState<'add' | 'remove'>('remove')
+  const [submitting, setSubmitting] = useState(false)
   const [note, setNote] = useState('')
 
   const copy = MONEY_COPY[mode]
@@ -327,25 +559,37 @@ export function MoneySheet({
     onClose()
   }
 
-  const submit = () => {
-    if (!account || !session || !valid) return
-    const { customer } = account
-    if (mode === 'take') {
-      walletService.takeMoney({ customerId: customer.id, amount: capped, method, session, note })
-      pushToast(`${formatINR(capped)} received from ${customer.name}`, 'ok')
-    } else if (mode === 'return') {
-      walletService.returnMoney({ customerId: customer.id, amount: capped, method, session, note })
-      pushToast(`${formatINR(capped)} returned to ${customer.name}`, 'ok')
-    } else {
-      walletService.adjust({
-        customerId: customer.id,
-        amount: direction === 'add' ? capped : -capped,
-        note,
-        session,
-      })
-      pushToast(`${customer.name}'s balance adjusted`, 'warn')
+  /**
+   * The balance is passed in rather than re-read. It decides only how the
+   * entry is LABELLED (clearing a due versus topping up) and how far a
+   * refund can go; the balance itself is always recomputed from the ledger,
+   * so a few seconds of staleness cannot make the money wrong.
+   */
+  const submit = async () => {
+    if (!account || !session || !valid || submitting) return
+    const { customer, balance } = account
+    setSubmitting(true)
+    try {
+      if (mode === 'take') {
+        await walletService.takeMoney({ customerId: customer.id, amount: capped, method, balance, note })
+        pushToast(`${formatINR(capped)} received from ${customer.name}`, 'ok')
+      } else if (mode === 'return') {
+        await walletService.returnMoney({ customerId: customer.id, amount: capped, method, balance, note })
+        pushToast(`${formatINR(capped)} returned to ${customer.name}`, 'ok')
+      } else {
+        await walletService.adjust({
+          customerId: customer.id,
+          amount: direction === 'add' ? capped : -capped,
+          note,
+        })
+        pushToast(`${customer.name}'s balance adjusted`, 'warn')
+      }
+      close()
+    } catch (error) {
+      pushToast(toAppError(error, 'Could not record that.').userMessage, 'danger')
+    } finally {
+      setSubmitting(false)
     }
-    close()
   }
 
   return (
@@ -455,14 +699,30 @@ export function AccountActions({
   )
 }
 
-/** Small inline marker for a sitting that has a guest attached. */
-export function GuestChip({ account, onChange }: { account: CustomerAccount; onChange?: () => void }) {
+/**
+ * One line for the guest on a sitting. Who they are comes first and never
+ * gets squeezed out; the wallet only rides along where money is being taken,
+ * because on the order screen it is the name and number that matter.
+ */
+export function GuestChip({
+  account,
+  onChange,
+  showBalance = false,
+}: {
+  account: CustomerAccount
+  onChange?: () => void
+  showBalance?: boolean
+}) {
   return (
     <div className="flex items-center gap-2 rounded-full bg-surface-100 py-1 pl-2.5 pr-1.5 text-[12px]">
-      <Wallet className="size-3.5 shrink-0 text-ink-300" />
-      <span className="min-w-0 truncate font-semibold">{account.customer.name}</span>
-      <span className="shrink-0 text-ink-500">{account.customer.phone}</span>
-      <BalancePill balance={account.balance} />
+      {showBalance ? (
+        <Wallet className="size-3.5 shrink-0 text-ink-300" />
+      ) : (
+        <User className="size-3.5 shrink-0 text-ink-300" />
+      )}
+      <span className="min-w-0 flex-1 truncate font-semibold">{account.customer.name}</span>
+      <span className="shrink-0 tabular-nums text-ink-500">{account.customer.phone}</span>
+      {showBalance && <BalancePill balance={account.balance} />}
       {onChange && (
         <button
           type="button"

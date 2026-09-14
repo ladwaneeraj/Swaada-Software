@@ -28,3 +28,16 @@ _to_delete/
 
 # Screenshots the desktop app drops here when files are shared in chat
 Claude outputs/
+
+# Environment — real config stays out of git, .env.example is the template
+.env
+.env.*
+!.env.example
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+functions/lib/
+*-service-account*.json
