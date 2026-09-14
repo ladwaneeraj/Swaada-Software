@@ -1,16 +1,16 @@
 {
+  "//": [
+    "Only composite indexes belong here. Firestore indexes every single field",
+    "automatically, so a 'composite' index over one field plus __name__ is",
+    "redundant and the API rejects it with a 400. That covers the big range",
+    "queries in queries.ts: `where businessDate >= x and <= y` combined with",
+    "`orderBy businessDate` is a range and a sort on the SAME field, which the",
+    "automatic index already serves. Only the queries that touch TWO fields",
+    "need declaring, and those are the three below."
+  ],
   "indexes": [
     {
-      "//": "History and analytics: bills across a range of cafe days, newest first.",
-      "collectionGroup": "bills",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "businessDate", "order": "DESCENDING" },
-        { "fieldPath": "__name__", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "//": "A guest's own bills, newest first, on their account page.",
+      "//": "queries.billsForCustomer — one guest's bills, newest first.",
       "collectionGroup": "bills",
       "queryScope": "COLLECTION",
       "fields": [
@@ -19,16 +19,7 @@
       ]
     },
     {
-      "//": "Analytics: rounds across a range of cafe days.",
-      "collectionGroup": "orders",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "businessDate", "order": "DESCENDING" },
-        { "fieldPath": "__name__", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "//": "Today's cancelled rounds, so the kitchen is told rather than left guessing.",
+      "//": "sync.ts — today's cancelled rounds, so the kitchen is told.",
       "collectionGroup": "orders",
       "queryScope": "COLLECTION",
       "fields": [
@@ -37,7 +28,7 @@
       ]
     },
     {
-      "//": "The activity log, a day at a time, newest first.",
+      "//": "queries.audit — the activity log, a day at a time, newest first.",
       "collectionGroup": "auditLog",
       "queryScope": "COLLECTION",
       "fields": [

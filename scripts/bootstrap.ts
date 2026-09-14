@@ -30,7 +30,7 @@ import { getAuth } from 'firebase-admin/auth'
 import { getFirestore } from 'firebase-admin/firestore'
 import { readFileSync } from 'node:fs'
 import { seedCatalogue } from '../src/data/seed'
-import { DEFAULT_SETTINGS } from '../src/services/settings'
+import { DEFAULT_SETTINGS } from '../src/data/defaultSettings'
 import type { ModifierOption } from '../src/types'
 
 /* ------------------------------ arguments ------------------------------ */

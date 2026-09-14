@@ -3,6 +3,7 @@ import { settingsRef } from './firebase/paths'
 import { requireOutletId } from './context'
 import { record } from './audit'
 import { toAppError } from '@/lib/errors'
+import { DEFAULT_SETTINGS as DEFAULTS } from '@/data/defaultSettings'
 import type { CafeSettings } from '@/types'
 
 /**
@@ -33,21 +34,12 @@ export const settingsService = {
   },
 }
 
-/** Used before the settings document has loaded, and by the bootstrap script. */
-export const DEFAULT_SETTINGS: CafeSettings = {
-  cafeName: 'Swaada Café',
-  currency: 'INR',
-  timezone: 'Asia/Kolkata',
-  dayStartHour: 0,
-  askCustomerInfo: true,
-  wallet: { allowPayLater: true },
-  sound: {
-    newOrderAlert: true,
-    volume: 0.7,
-    repeatUntilAcknowledged: true,
-    repeatSeconds: 25,
-  },
-}
+/**
+ * Re-exported from a leaf module so the Node bootstrap script can read the
+ * same defaults without importing this file, which reaches Firestore and
+ * `import.meta.env` and therefore cannot run outside a browser.
+ */
+export { DEFAULT_SETTINGS } from '@/data/defaultSettings'
 
 /** The two settings the business-date helpers need, in the shape they take. */
 export function businessDayConfig(settings: CafeSettings): {
@@ -55,7 +47,7 @@ export function businessDayConfig(settings: CafeSettings): {
   dayStartHour: number
 } {
   return {
-    timezone: settings.timezone || DEFAULT_SETTINGS.timezone,
-    dayStartHour: settings.dayStartHour ?? DEFAULT_SETTINGS.dayStartHour,
+    timezone: settings.timezone || DEFAULTS.timezone,
+    dayStartHour: settings.dayStartHour ?? DEFAULTS.dayStartHour,
   }
 }

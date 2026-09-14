@@ -39,5 +39,19 @@ Claude outputs/
 firebase-debug.log
 firestore-debug.log
 ui-debug.log
-functions/lib/
-*-service-account*.json
+
+# Service account keys.
+#
+# These are REAL credentials, unlike the web config: one of these files is
+# full admin access to a Firebase project, bypassing every security rule.
+# Leaking one into a public repo means handing over the café's data.
+# Patterns cover both the name Firebase downloads them under and the short
+# names used locally.
+sa.json
+sa-*.json
+*service-account*.json
+*serviceaccount*.json
+*-firebase-adminsdk-*.json
+
+# Local backups written by `npm run backup`
+backups/

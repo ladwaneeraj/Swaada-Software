@@ -11,13 +11,14 @@
     "typecheck": "tsc -b",
     "bootstrap": "tsx scripts/bootstrap.ts",
     "emulators": "firebase emulators:start",
-    "deploy:dev": "npm run build && firebase deploy --only hosting,firestore -P dev",
+    "deploy:dev": "npm run build:dev && firebase deploy --only hosting,firestore -P dev",
     "deploy:prod": "npm run build && firebase deploy --only hosting,firestore -P prod",
     "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes",
     "test": "vitest run tests/money.test.ts tests/businessDate.test.ts",
     "test:rules": "firebase emulators:exec --only firestore --project swaada-rules-test \"vitest run tests/rules.test.ts\"",
     "test:all": "npm run test && npm run test:rules",
-    "backup": "tsx scripts/backup.ts"
+    "backup": "tsx scripts/backup.ts",
+    "build:dev": "tsc -b && vite build --mode development && node -e \"require('fs').copyFileSync('dist/index.html','dist/404.html')\""
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

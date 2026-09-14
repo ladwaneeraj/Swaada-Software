@@ -131,22 +131,24 @@ for (const [img, ids] of Object.entries(ITEM_IMAGES)) {
 }
 
 /**
- * Real photos, resolved at build time. Drop a file into
- * src/assets/menu-photos/ named after the item id WITHOUT its `itm-` prefix
- * — paneer-pizza.webp for itm-paneer-pizza — and the next build picks it up.
- * There is no list to keep in sync here: the folder is the list. Items with
- * no photo fall back to the bundled illustration above, and items with
- * neither show their category icon.
+ * Photos used to be resolved here with `import.meta.glob`, pulling whatever
+ * was in src/assets/menu-photos/ into the seed. That was right for the
+ * prototype and wrong the moment the menu moved into a database, for two
+ * reasons:
+ *
+ *  - it is a VITE feature, and this file is now read by a Node script, which
+ *    has no idea what import.meta.glob is;
+ *  - more importantly, it produced build-hashed URLs like
+ *    /assets/paneer-pizza-a1b2c3.webp. Writing one of those into Firestore
+ *    freezes a filename that changes on the next build, so the photo would
+ *    silently vanish from a running café the first time anything was
+ *    redeployed.
+ *
+ * So the seed now carries only the stable illustration paths below. Real
+ * photos belong on the menu item itself, set from the Menu screen once the
+ * café is running — which is also the only way a manager can change one
+ * without a developer.
  */
-const photoByItemId = new Map<string, string>(
-  Object.entries(
-    import.meta.glob('../assets/menu-photos/*.{webp,avif,jpg,jpeg,png}', {
-      eager: true,
-      query: '?url',
-      import: 'default',
-    }) as Record<string, string>,
-  ).map(([path, url]) => [`itm-${path.split('/').pop()!.replace(/\.[^.]+$/, '')}`, url]),
-)
 
 function buildItems(categoryId: ID, defaults: CategoryDefaults, seeds: ItemSeed[]): MenuItem[] {
   return seeds.map((s, i) => ({
@@ -154,7 +156,7 @@ function buildItems(categoryId: ID, defaults: CategoryDefaults, seeds: ItemSeed[
     categoryId,
     name: s.name,
     description: s.desc ?? '',
-    image: photoByItemId.get(s.id) ?? imageByItemId.get(s.id) ?? null,
+    image: imageByItemId.get(s.id) ?? null,
     basePrice: s.price,
     availability: s.availability ?? 'available',
     isVegetarian: s.veg ?? true,
