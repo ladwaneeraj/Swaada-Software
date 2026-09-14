@@ -4,87 +4,100 @@ import { sequencesRef } from './paths'
 import { deviceId } from './device'
 
 /**
- * Order and bill numbers that keep working when the wifi does not.
+ * Order and bill numbers.
  *
- * The obvious design — read the counter, add one, write it back, inside a
- * Firestore transaction — breaks the moment the cafe's connection drops,
- * because a transaction needs a round trip and a queued offline write does
- * not. A POS that cannot print a bill during an outage is not a POS.
+ * Two things are wanted and they pull against each other. Numbers should run
+ * 1, 2, 3 — a café reads them out loud, and "bill fifty-one" after "bill one"
+ * is a support call waiting to happen. And billing must keep working when the
+ * wifi drops, which rules out a round trip per number.
  *
- * So a device RESERVES a block of numbers while it is online and hands them
- * out locally. Reserving 100 order numbers costs one transaction and then
- * covers roughly a day of trading offline. The block is topped up in the
- * background once it is three-quarters used, so the counter never waits.
+ * So: ask the server, and keep a small reserve for when the server is not
+ * there.
  *
- * The trade-off, stated plainly: a device that is retired or has its storage
- * cleared mid-block leaves a gap in the sequence. That is acceptable here
- * because no GST is charged anywhere in this app, so there is no legal
- * requirement for a gapless invoice series. If that ever changes, this is
- * the file to revisit.
+ *   ONLINE   one transaction increments the shared counter and returns the
+ *            number. Genuinely sequential across every device, because there
+ *            is one counter and it is authoritative. Costs one round trip,
+ *            roughly 40ms from Davanagere to Mumbai, on an action that
+ *            already involves a person pressing a button.
+ *
+ *   OFFLINE  the transaction fails, and the device hands out numbers from a
+ *            block it reserved earlier. That block is drawn from the same
+ *            counter, so the numbers can never collide with online ones.
+ *
+ * The visible cost is one gap per device, once: reserving the emergency
+ * block advances the shared counter past it. A café with three tills sees
+ * three small jumps in its first week and then a clean run. That is a much
+ * better trade than the previous design, which handed every device a block
+ * of a hundred up front and produced #1 followed by #101.
+ *
+ * Gaps are acceptable here at all only because no GST is charged anywhere in
+ * this app, so there is no legal requirement for a gapless invoice series.
+ * If that ever changes, this file is where to start.
  */
 
-const BLOCK_SIZES = { order: 100, bill: 50 } as const
-/** Top up once this much of the block is gone, so a refill never blocks. */
-const REFILL_AT = 0.75
+/** Deliberately small. This is an emergency runway, not the normal path. */
+const RESERVE_SIZES = { order: 50, bill: 25 } as const
 
-type SequenceKind = keyof typeof BLOCK_SIZES
-
-interface Block {
-  /** The next number this device may hand out. */
-  next: number
-  /** One past the last number in the reserved block. */
-  limit: number
-}
-
-type BlockStore = Partial<Record<SequenceKind, Block>>
-
-function storageKey(outletId: string): string {
-  return `swaada.seq.${outletId}.${deviceId()}`
-}
-
-function readBlocks(outletId: string): BlockStore {
-  try {
-    const raw = localStorage.getItem(storageKey(outletId))
-    return raw ? (JSON.parse(raw) as BlockStore) : {}
-  } catch {
-    return {}
-  }
-}
-
-function writeBlocks(outletId: string, blocks: BlockStore): void {
-  try {
-    localStorage.setItem(storageKey(outletId), JSON.stringify(blocks))
-  } catch {
-    /* storage unavailable: the in-flight block still works for this session */
-  }
-}
+type SequenceKind = keyof typeof RESERVE_SIZES
 
 const FIELD: Record<SequenceKind, 'nextOrderNumber' | 'nextBillNumber'> = {
   order: 'nextOrderNumber',
   bill: 'nextBillNumber',
 }
 
-/** Claim the next `size` numbers for this device. Requires connectivity. */
-async function reserve(outletId: string, kind: SequenceKind, size: number): Promise<Block> {
+interface Reserve {
+  /** The next number this device may hand out while offline. */
+  next: number
+  /** One past the last number in the reserved block. */
+  limit: number
+}
+
+type ReserveStore = Partial<Record<SequenceKind, Reserve>>
+
+function storageKey(outletId: string): string {
+  return `swaada.seq.${outletId}.${deviceId()}`
+}
+
+function readReserves(outletId: string): ReserveStore {
+  try {
+    const raw = localStorage.getItem(storageKey(outletId))
+    return raw ? (JSON.parse(raw) as ReserveStore) : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeReserves(outletId: string, reserves: ReserveStore): void {
+  try {
+    localStorage.setItem(storageKey(outletId), JSON.stringify(reserves))
+  } catch {
+    /* storage unavailable: the in-memory reserve still covers this session */
+  }
+}
+
+/**
+ * Take `count` numbers off the shared counter. Requires connectivity: a
+ * Firestore transaction needs a live round trip and will not queue offline.
+ */
+async function claim(outletId: string, kind: SequenceKind, count: number): Promise<number> {
   const ref = sequencesRef(outletId)
-  const start = await runTransaction(firestore, async (tx) => {
+  return runTransaction(firestore, async (tx) => {
     const snap = await tx.get(ref)
     const current = snap.data() ?? { nextOrderNumber: 1, nextBillNumber: 1 }
     const from = current[FIELD[kind]]
-    tx.set(ref, { ...current, [FIELD[kind]]: from + size }, { merge: true })
+    tx.set(ref, { ...current, [FIELD[kind]]: from + count }, { merge: true })
     return from
   })
-  return { next: start, limit: start + size }
 }
 
-const inFlight = new Map<string, Promise<Block>>()
+const inFlight = new Map<string, Promise<number>>()
 
-/** One refill at a time per outlet+kind, however many callers ask. */
-function reserveOnce(outletId: string, kind: SequenceKind, size: number): Promise<Block> {
+/** One reserve refill at a time per outlet+kind, however many callers ask. */
+function claimReserveOnce(outletId: string, kind: SequenceKind): Promise<number> {
   const key = `${outletId}:${kind}`
   const existing = inFlight.get(key)
   if (existing) return existing
-  const promise = reserve(outletId, kind, size).finally(() => inFlight.delete(key))
+  const promise = claim(outletId, kind, RESERVE_SIZES[kind]).finally(() => inFlight.delete(key))
   inFlight.set(key, promise)
   return promise
 }
@@ -92,69 +105,83 @@ function reserveOnce(outletId: string, kind: SequenceKind, size: number): Promis
 export class SequenceExhaustedError extends Error {
   constructor(kind: SequenceKind) {
     super(
-      `Ran out of reserved ${kind} numbers while offline. Reconnect to the internet once to get more.`,
+      `No internet, and this device has run out of spare ${kind} numbers. ` +
+        `Reconnect for a moment and it will top itself up.`,
     )
     this.name = 'SequenceExhaustedError'
   }
 }
 
+/** Hand out one number from this device's offline reserve. */
+function takeFromReserve(outletId: string, kind: SequenceKind): number {
+  const reserves = readReserves(outletId)
+  const reserve = reserves[kind]
+  if (!reserve || reserve.next >= reserve.limit) throw new SequenceExhaustedError(kind)
+  writeReserves(outletId, {
+    ...reserves,
+    [kind]: { next: reserve.next + 1, limit: reserve.limit },
+  })
+  return reserve.next
+}
+
 /**
- * The next number, taken from this device's block. Tops the block up in the
- * background when it is running low; only throws if the block is completely
- * spent AND the device cannot reach Firestore to reserve more.
+ * The next number.
+ *
+ * Tries the shared counter first, so numbers stay sequential across every
+ * device in the café. Falls back to this device's reserve only when that
+ * round trip fails, which in practice means the wifi has gone.
  */
 export async function nextNumber(outletId: string, kind: SequenceKind): Promise<number> {
-  const blocks = readBlocks(outletId)
-  let block = blocks[kind]
-  const size = BLOCK_SIZES[kind]
-
-  if (!block || block.next >= block.limit) {
-    try {
-      block = await reserveOnce(outletId, kind, size)
-    } catch {
-      throw new SequenceExhaustedError(kind)
-    }
+  try {
+    const value = await claim(outletId, kind, 1)
+    // Back online and the reserve was spent during an outage: quietly refill
+    // it so the next outage is covered too. Never blocks this call.
+    void ensureReserve(outletId, kind).catch(() => {
+      /* still flaky: try again after the next order */
+    })
+    return value
+  } catch {
+    return takeFromReserve(outletId, kind)
   }
-
-  const value = block.next
-  const updated: Block = { next: value + 1, limit: block.limit }
-  writeBlocks(outletId, { ...blocks, [kind]: updated })
-
-  const used = (updated.next - (updated.limit - size)) / size
-  if (used >= REFILL_AT && updated.next < updated.limit) {
-    // Fire and forget: extend the runway before anyone is waiting on it.
-    void reserveOnce(outletId, kind, size)
-      .then((fresh) => {
-        const latest = readBlocks(outletId)
-        const held = latest[kind]
-        // Only adopt the fresh block once the current one is actually spent,
-        // so numbers stay in order rather than jumping forward early.
-        if (!held || held.next >= held.limit) writeBlocks(outletId, { ...latest, [kind]: fresh })
-      })
-      .catch(() => {
-        /* offline: the current block still has room, try again next time */
-      })
-  }
-
-  return value
 }
 
-/** How many numbers this device can still issue offline. For Settings. */
+/**
+ * Make sure this device has an emergency block, claiming one if not.
+ *
+ * This is what causes the single visible gap per device. It happens once,
+ * on first use, and again only after an outage has actually eaten the
+ * reserve. Doing it lazily rather than at every login is the difference
+ * between one jump and one jump per sign-in.
+ */
+async function ensureReserve(outletId: string, kind: SequenceKind): Promise<void> {
+  const held = readReserves(outletId)[kind]
+  if (held && held.next < held.limit) return
+  const start = await claimReserveOnce(outletId, kind)
+  const latest = readReserves(outletId)
+  const current = latest[kind]
+  // Only adopt it if the reserve is still spent: another tab may have
+  // refilled while this claim was in flight.
+  if (!current || current.next >= current.limit) {
+    writeReserves(outletId, {
+      ...latest,
+      [kind]: { next: start, limit: start + RESERVE_SIZES[kind] },
+    })
+  }
+}
+
+/** How many numbers this device could still issue with no internet. */
 export function remainingInBlock(outletId: string, kind: SequenceKind): number {
-  const block = readBlocks(outletId)[kind]
-  return block ? Math.max(0, block.limit - block.next) : 0
+  const reserve = readReserves(outletId)[kind]
+  return reserve ? Math.max(0, reserve.limit - reserve.next) : 0
 }
 
-/** Warm both blocks at login so the first order of the day never waits. */
+/**
+ * Claim the emergency blocks at login, so a device that goes offline mid
+ * service already has a runway. Failing is fine: the first order will try
+ * again, and until then the online path works perfectly well on its own.
+ */
 export async function primeSequences(outletId: string): Promise<void> {
   await Promise.allSettled(
-    (Object.keys(BLOCK_SIZES) as SequenceKind[]).map(async (kind) => {
-      const block = readBlocks(outletId)[kind]
-      if (block && block.limit - block.next > BLOCK_SIZES[kind] * (1 - REFILL_AT)) return
-      const fresh = await reserveOnce(outletId, kind, BLOCK_SIZES[kind])
-      const latest = readBlocks(outletId)
-      const held = latest[kind]
-      if (!held || held.next >= held.limit) writeBlocks(outletId, { ...latest, [kind]: fresh })
-    }),
+    (Object.keys(RESERVE_SIZES) as SequenceKind[]).map((kind) => ensureReserve(outletId, kind)),
   )
 }

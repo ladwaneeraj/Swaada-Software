@@ -1,17 +1,25 @@
 import {
   DndContext,
+  KeyboardSensor,
   PointerSensor,
+  TouchSensor,
   closestCenter,
   useSensor,
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core'
-import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { GripVertical, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { PageHeader } from '@/components/layout/AdminLayout'
-import { useToasts } from '@/components/toast'
+import { useAction, useToasts } from '@/components/toast'
 import {
   Badge,
   Button,
@@ -37,6 +45,30 @@ import type { Category, ID, ItemAvailability, MenuItem } from '@/types'
  * categories, prices, availability, stations, ordering. One-tap
  * availability changes reach the order screen and kitchen instantly.
  */
+/**
+ * Drag sensors that work on a phone.
+ *
+ * A pointer sensor alone does not. On touch, "moved six pixels" is
+ * indistinguishable from the start of a scroll, so the browser claims the
+ * gesture and the drag never begins — which is exactly what reordering
+ * categories on a phone felt like.
+ *
+ * A touch sensor with a delay fixes it: press and hold for a moment to pick
+ * something up, swipe to scroll as normal. That is the gesture people
+ * already know from reordering apps on a home screen.
+ *
+ * The keyboard sensor is free and makes the whole thing reachable without a
+ * pointer at all: tab to a handle, space to lift, arrows to move.
+ *
+ * The handles themselves also need `touch-none`, or the browser keeps the
+ * gesture regardless of what dnd-kit wants.
+ */
+const DRAG_SENSORS = () => [
+  useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } }),
+  useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+]
+
 export function MenuPage() {
   const [tab, setTab] = useState<'items' | 'categories'>('items')
   return (
@@ -54,6 +86,7 @@ export function MenuPage() {
 /* ================================ ITEMS ================================= */
 
 function ItemsTab() {
+  const run = useAction()
   const items = useAppStore((s) => s.db.items)
   const categories = useAppStore((s) => s.db.categories)
   const stations = useAppStore((s) => s.db.stations)
@@ -79,7 +112,7 @@ function ItemsTab() {
   }, [items, categories, query, categoryFilter, availabilityFilter, categoryById])
 
   const dragEnabled = categoryFilter !== 'all' && !query.trim() && availabilityFilter === 'all'
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+  const sensors = useSensors(...DRAG_SENSORS())
 
   const onDragEnd = (e: DragEndEvent) => {
     const { active, over } = e
@@ -88,18 +121,20 @@ function ItemsTab() {
     const from = ids.indexOf(String(active.id))
     const to = ids.indexOf(String(over.id))
     if (from === -1 || to === -1) return
-    menuService.reorderItems(categoryFilter, arrayMove(ids, from, to))
+    run(menuService.reorderItems(categoryFilter, arrayMove(ids, from, to)))
   }
 
   return (
     <div>
       {/* Controls */}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="relative min-w-52 flex-1">
+      {/* Stacked on a phone, one row from sm up. The selects lose their fixed
+          widths below sm or they sit half-width next to nothing. */}
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="relative sm:min-w-52 sm:flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-300" />
           <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search items or categories…" className="pl-9" aria-label="Search menu items" />
         </div>
-        <div className="w-44 shrink-0">
+        <div className="w-full sm:w-44 sm:shrink-0">
         <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value as ID | 'all')} aria-label="Filter by category">
           <option value="all">All categories</option>
           {sortedCategories.map((c) => (
@@ -109,7 +144,7 @@ function ItemsTab() {
           ))}
         </Select>
         </div>
-        <div className="w-40 shrink-0">
+        <div className="w-full sm:w-40 sm:shrink-0">
         <Select
           value={availabilityFilter}
           onChange={(e) => setAvailabilityFilter(e.target.value as ItemAvailability | 'all')}
@@ -123,12 +158,12 @@ function ItemsTab() {
           ))}
         </Select>
         </div>
-        <Button onClick={() => setEditing('new')}>
+        <Button onClick={() => setEditing('new')} className="w-full justify-center sm:w-auto">
           <Plus className="size-4" /> Add item
         </Button>
       </div>
 
-      <p className="mb-3 text-xs text-ink-500">
+      <p className="mb-3 hidden text-xs text-ink-500 md:block">
         {dragEnabled
           ? 'Drag rows to change the display order within this category.'
           : 'Pick a single category (with no search or status filter) to drag-reorder its items.'}
@@ -137,7 +172,33 @@ function ItemsTab() {
       {visible.length === 0 ? (
         <EmptyState icon="🔍" title="No items match" hint="Try a different search or filter." />
       ) : (
-        <Card className="overflow-hidden">
+        <>
+          {/*
+            Two renderings of the same list, and not a lazy one.
+
+            The table needs 46rem to breathe, so on a phone it becomes a
+            sideways-scrolling strip where the price is always just off the
+            edge. A menu is something a manager edits standing at the counter
+            on their phone, so below md it is cards: everything about one item
+            visible at once, nothing to scroll horizontally.
+
+            Reordering is left out of the card view on purpose. Drag handles
+            on a touch screen fight with the page scroll, and dragging a
+            hundred-item list on a phone is not a thing anyone wants to do.
+          */}
+          <div className="space-y-2 md:hidden">
+            {visible.map((item) => (
+              <ItemCard
+                key={item.id}
+                item={item}
+                categoryName={categoryById.get(item.categoryId)?.name ?? '—'}
+                stationName={stationNameById.get(item.stationId) ?? '—'}
+                onEdit={() => setEditing(item)}
+              />
+            ))}
+          </div>
+
+          <Card className="hidden overflow-hidden md:block">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[46rem] text-left text-sm">
               <thead>
@@ -169,11 +230,98 @@ function ItemsTab() {
               </DndContext>
             </table>
           </div>
-        </Card>
+          </Card>
+        </>
       )}
 
       {editing && <ItemEditor item={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
     </div>
+  )
+}
+
+/**
+ * The availability control, shared by the table row and the phone card so
+ * the two can never drift apart. Three states, one tap: on the menu, out of
+ * stock today, or off the menu entirely.
+ */
+function AvailabilityControl({ item }: { item: MenuItem }) {
+  const run = useAction()
+  return (
+    <Segmented
+      size="sm"
+      value={item.availability}
+      onChange={(next) => {
+        run(
+          menuService.setItemAvailability(item.id, next),
+          next === 'out_of_stock'
+            ? `${item.name} marked out of stock`
+            : next === 'available'
+              ? `${item.name} back on the menu`
+              : `${item.name} taken off the menu`,
+        )
+      }}
+      options={[
+        { value: 'available', label: '●' },
+        { value: 'out_of_stock', label: '×' },
+        { value: 'disabled', label: '—' },
+      ]}
+    />
+  )
+}
+
+/** One menu item on a phone. Everything visible at once, nothing sideways. */
+function ItemCard({
+  item,
+  categoryName,
+  stationName,
+  onEdit,
+}: {
+  item: MenuItem
+  categoryName: string
+  stationName: string
+  onEdit: () => void
+}) {
+  const meta = AVAILABILITY_META[item.availability]
+  return (
+    <Card className="p-3.5">
+      <div className="flex items-start gap-3">
+        {item.image && (
+          <img
+            src={assetUrl(item.image)}
+            alt=""
+            loading="lazy"
+            className="size-12 shrink-0 rounded-xl bg-surface-100 object-cover"
+          />
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="flex flex-wrap items-center gap-1.5 text-[15px] font-bold leading-tight">
+            <VegMark isVeg={item.isVegetarian} className="size-3.5 shrink-0" />
+            <span className="min-w-0 break-words">{item.name}</span>
+            {item.isPopular && <Badge tone="accent">Popular</Badge>}
+            {item.isRecommended && <Badge tone="ok">Pick</Badge>}
+          </p>
+          <p className="mt-0.5 text-xs text-ink-500">
+            {categoryName} · {stationName}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span className="text-[15px] font-bold tabular-nums">{formatINR(item.basePrice)}</span>
+          <button
+            type="button"
+            onClick={onEdit}
+            aria-label={`Edit ${item.name}`}
+            className="grid size-9 place-items-center rounded-lg text-ink-500 hover:bg-surface-100 hover:text-ink-900"
+          >
+            <Pencil className="size-4" />
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-2 border-t border-surface-100 pt-3">
+        <Badge tone={meta.tone}>{meta.label}</Badge>
+        <AvailabilityControl item={item} />
+      </div>
+    </Card>
   )
 }
 
@@ -194,7 +342,6 @@ function ItemRow({
     id: item.id,
     disabled: !dragEnabled,
   })
-  const pushToast = useToasts((s) => s.push)
   const meta = AVAILABILITY_META[item.availability]
 
   return (
@@ -210,7 +357,7 @@ function ItemRow({
           {...listeners}
           disabled={!dragEnabled}
           aria-label={`Reorder ${item.name}`}
-          className={cn('grid size-8 place-items-center rounded-lg text-ink-300', dragEnabled ? 'cursor-grab hover:bg-surface-100 hover:text-ink-700' : 'opacity-30')}
+          className={cn('grid size-8 touch-none place-items-center rounded-lg text-ink-300', dragEnabled ? 'cursor-grab hover:bg-surface-100 hover:text-ink-700' : 'opacity-30')}
         >
           <GripVertical className="size-4" />
         </button>
@@ -229,21 +376,7 @@ function ItemRow({
       <td className="px-3 py-2.5 text-ink-500">{categoryName}</td>
       <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{formatINR(item.basePrice)}</td>
       <td className="px-3 py-2.5">
-        {/* One-tap availability cycle: Available → Out of stock → Disabled */}
-        <Segmented
-          size="sm"
-          value={item.availability}
-          onChange={(next) => {
-            menuService.setItemAvailability(item.id, next)
-            if (next === 'out_of_stock') pushToast(`${item.name} marked out of stock`, 'warn')
-            if (next === 'available') pushToast(`${item.name} back on the menu`, 'ok')
-          }}
-          options={[
-            { value: 'available', label: '●' },
-            { value: 'out_of_stock', label: '×' },
-            { value: 'disabled', label: '—' },
-          ]}
-        />
+        <AvailabilityControl item={item} />
         <Badge tone={meta.tone} className="ml-2 hidden xl:inline-flex">
           {meta.label}
         </Badge>
@@ -261,6 +394,7 @@ function ItemRow({
 /* ----------------------------- Item editor ------------------------------ */
 
 function ItemEditor({ item, onClose }: { item: MenuItem | null; onClose: () => void }) {
+  const run = useAction()
   const categories = useAppStore((s) => s.db.categories)
   const stations = useAppStore((s) => s.db.stations)
   const modifierGroups = useAppStore((s) => s.db.modifierGroups)
@@ -316,10 +450,10 @@ function ItemEditor({ item, onClose }: { item: MenuItem | null; onClose: () => v
       .filter(Boolean)
     const input = { ...form, name: form.name.trim(), description: form.description.trim(), tags }
     if (item) {
-      menuService.updateItem(item.id, input)
+      run(menuService.updateItem(item.id, input))
       pushToast(`${input.name} updated`, 'ok')
     } else {
-      menuService.createItem(input)
+      run(menuService.createItem(input))
       pushToast(`${input.name} added to the menu`, 'ok')
     }
     onClose()
@@ -338,7 +472,7 @@ function ItemEditor({ item, onClose }: { item: MenuItem | null; onClose: () => v
               variant="ghost"
               className="text-danger-600"
               onClick={() => {
-                menuService.archiveItem(item.id)
+                run(menuService.archiveItem(item.id, item.name))
                 pushToast(`${item.name} removed (order history is kept)`, 'warn')
                 onClose()
               }}
@@ -461,6 +595,7 @@ function ItemEditor({ item, onClose }: { item: MenuItem | null; onClose: () => v
 /* ============================== CATEGORIES ============================== */
 
 function CategoriesTab() {
+  const run = useAction()
   const categories = useAppStore((s) => s.db.categories)
   const items = useAppStore((s) => s.db.items)
   const [editing, setEditing] = useState<Category | 'new' | null>(null)
@@ -468,7 +603,7 @@ function CategoriesTab() {
   const pushToast = useToasts((s) => s.push)
 
   const sorted = useMemo(() => [...categories].sort(byDisplayOrder), [categories])
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+  const sensors = useSensors(...DRAG_SENSORS())
 
   const onDragEnd = (e: DragEndEvent) => {
     const { active, over } = e
@@ -477,7 +612,7 @@ function CategoriesTab() {
     const from = ids.indexOf(String(active.id))
     const to = ids.indexOf(String(over.id))
     if (from === -1 || to === -1) return
-    menuService.reorderCategories(arrayMove(ids, from, to))
+    run(menuService.reorderCategories(arrayMove(ids, from, to)))
   }
 
   return (
@@ -500,7 +635,7 @@ function CategoriesTab() {
                 onEdit={() => setEditing(category)}
                 onDelete={() => setDeleting(category)}
                 onToggle={(isActive) => {
-                  menuService.updateCategory(category.id, { isActive })
+                  run(menuService.updateCategory(category.id, { isActive }))
                   pushToast(isActive ? `${category.name} enabled` : `${category.name} hidden from the menu`, isActive ? 'ok' : 'warn')
                 }}
               />
@@ -524,7 +659,7 @@ function CategoriesTab() {
               variant="danger"
               onClick={() => {
                 if (!deleting) return
-                menuService.archiveCategory(deleting.id)
+                run(menuService.archiveCategory(deleting.id))
                 pushToast(`${deleting.name} deleted (past orders keep their history)`, 'warn')
                 setDeleting(null)
               }}
@@ -567,7 +702,7 @@ function CategoryRow({
         !category.isActive && 'opacity-60',
       )}
     >
-      <button type="button" {...attributes} {...listeners} aria-label={`Reorder ${category.name}`} className="grid size-9 shrink-0 cursor-grab place-items-center rounded-lg text-ink-300 hover:bg-surface-100 hover:text-ink-700">
+      <button type="button" {...attributes} {...listeners} aria-label={`Reorder ${category.name}`} className="grid size-9 shrink-0 cursor-grab touch-none place-items-center rounded-lg text-ink-300 hover:bg-surface-100 hover:text-ink-700">
         <GripVertical className="size-4" />
       </button>
       <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-surface-100 text-xl" aria-hidden>
@@ -594,6 +729,7 @@ function CategoryRow({
 }
 
 function CategoryEditor({ category, onClose }: { category: Category | null; onClose: () => void }) {
+  const run = useAction()
   const [form, setForm] = useState<CategoryInput>(() =>
     category
       ? { name: category.name, description: category.description, icon: category.icon, isActive: category.isActive }
@@ -604,8 +740,8 @@ function CategoryEditor({ category, onClose }: { category: Category | null; onCl
   const save = () => {
     if (!form.name.trim()) return
     const input = { ...form, name: form.name.trim(), description: form.description.trim() }
-    if (category) menuService.updateCategory(category.id, input)
-    else menuService.createCategory(input)
+    if (category) run(menuService.updateCategory(category.id, input))
+    else run(menuService.createCategory(input))
     onClose()
   }
 

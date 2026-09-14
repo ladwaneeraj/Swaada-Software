@@ -1,5 +1,7 @@
+import { useCallback } from 'react'
 import { create } from 'zustand'
 import { cn } from '@/lib/utils'
+import { toAppError } from '@/lib/errors'
 import type { Tone } from '@/lib/statusMeta'
 
 /** Lightweight toast notifications (order ready, item 86'd, etc.). */
@@ -58,5 +60,32 @@ export function Toaster() {
         </button>
       ))}
     </div>
+  )
+}
+
+/**
+ * Fire a service call and say something if it fails.
+ *
+ * Every write is async now, and a fire-and-forget promise swallows its
+ * rejection. That is how a permission denied or a lost connection turns into
+ * "I tapped it and nothing happened", which is the worst possible failure
+ * for a cashier mid-service. This makes the quiet cases loud.
+ *
+ *   const run = useAction()
+ *   run(menuService.setItemAvailability(id, 'out_of_stock'), `${name} is off`)
+ */
+export function useAction(): (promise: Promise<unknown>, onSuccess?: string) => void {
+  const push = useToasts((s) => s.push)
+  return useCallback(
+    (promise, onSuccess) => {
+      void promise
+        .then(() => {
+          if (onSuccess) push(onSuccess, 'ok')
+        })
+        .catch((error: unknown) => {
+          push(toAppError(error).userMessage, 'danger')
+        })
+    },
+    [push],
   )
 }

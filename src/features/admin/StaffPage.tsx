@@ -67,7 +67,7 @@ export function StaffPage() {
         title="Staff"
         sub="Who can sign in, and what each of them is allowed to do"
         actions={
-          <Button onClick={() => setCreating(true)}>
+          <Button onClick={() => setCreating(true)} className="w-full justify-center sm:w-auto">
             <UserPlus className="size-4" /> Add login
           </Button>
         }
@@ -86,26 +86,33 @@ export function StaffPage() {
             const lastAdmin = member.role === 'admin' && member.isActive && activeAdmins === 1
             return (
               <Card key={member.id} className={cn('p-4', !member.isActive && 'opacity-60')}>
-                <div className="flex flex-wrap items-center gap-3">
+                {/* Identity first and always full width. Cramming the role
+                    picker and two icon buttons onto this line works at
+                    desktop and collapses into a jumble on a phone, so the
+                    controls get their own row below until sm. */}
+                <div className="flex items-start gap-3">
                   <span className="grid size-10 shrink-0 place-items-center rounded-full bg-accent-50 text-sm font-bold text-accent-600">
                     {member.displayName.trim().charAt(0).toUpperCase() || '?'}
                   </span>
 
                   <div className="min-w-0 flex-1">
                     <p className="flex flex-wrap items-center gap-2 text-sm font-bold">
-                      {member.displayName}
+                      <span className="min-w-0 break-words">{member.displayName}</span>
                       {isSelf && <Badge tone="accent">You</Badge>}
                       {!member.isActive && <Badge tone="danger">Switched off</Badge>}
                     </p>
-                    <p className="text-xs text-ink-500">
+                    <p className="break-words text-xs text-ink-500">
                       signs in as <b className="text-ink-700">{member.username}</b>
                       {member.replacedByUsername
                         ? ` · replaced by ${member.replacedByUsername}`
                         : ` · added ${dateTimeLabel(member.createdAt)}`}
                     </p>
+                    <p className="mt-1 text-xs text-ink-500">{ROLE_NOTE[member.role]}</p>
                   </div>
+                </div>
 
-                  <div className="w-36 shrink-0">
+                <div className="mt-3 flex flex-col gap-2 border-t border-surface-100 pt-3 sm:flex-row sm:items-center">
+                  <div className="w-full sm:w-40">
                     <Select
                       value={member.role}
                       aria-label={`Role for ${member.displayName}`}
@@ -120,32 +127,41 @@ export function StaffPage() {
                     </Select>
                   </div>
 
-                  <Button
-                    variant="secondary"
-                    aria-label={`Replace the login for ${member.displayName}`}
-                    title="They forgot their password — make them a new login"
-                    disabled={!member.isActive}
-                    onClick={() => setReplacing(member)}
-                  >
-                    <RefreshCw className="size-4" />
-                  </Button>
+                  {/* Labelled on a phone, icon-only once space is tight. An
+                      unlabelled circular arrow is not a guessable way to say
+                      "they forgot their password". */}
+                  <div className="flex gap-2 sm:ml-auto">
+                    <Button
+                      variant="secondary"
+                      className="flex-1 justify-center sm:flex-none"
+                      aria-label={`Replace the login for ${member.displayName}`}
+                      title="They forgot their password — make them a new login"
+                      disabled={!member.isActive}
+                      onClick={() => setReplacing(member)}
+                    >
+                      <RefreshCw className="size-4" />
+                      <span className="sm:hidden">New login</span>
+                    </Button>
 
-                  <Button
-                    variant="secondary"
-                    className={member.isActive ? 'text-danger-600' : 'text-ok-600'}
-                    disabled={lastAdmin || isSelf}
-                    aria-label={member.isActive ? `Switch off ${member.displayName}` : `Switch on ${member.displayName}`}
-                    onClick={() => void change(member, { isActive: !member.isActive })}
-                  >
-                    <Power className="size-4" />
-                  </Button>
+                    <Button
+                      variant="secondary"
+                      className={cn(
+                        'flex-1 justify-center sm:flex-none',
+                        member.isActive ? 'text-danger-600' : 'text-ok-600',
+                      )}
+                      disabled={lastAdmin || isSelf}
+                      aria-label={member.isActive ? `Switch off ${member.displayName}` : `Switch on ${member.displayName}`}
+                      onClick={() => void change(member, { isActive: !member.isActive })}
+                    >
+                      <Power className="size-4" />
+                      <span className="sm:hidden">{member.isActive ? 'Switch off' : 'Switch on'}</span>
+                    </Button>
+                  </div>
                 </div>
 
-                <p className="mt-2 pl-13 text-xs text-ink-500">{ROLE_NOTE[member.role]}</p>
-
                 {lastAdmin && (
-                  <p className="mt-2 flex items-center gap-1.5 rounded-lg bg-surface-100 px-2 py-1.5 text-[11px] font-semibold text-ink-500">
-                    <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
+                  <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-surface-100 px-2 py-1.5 text-[11px] font-semibold text-ink-500">
+                    <ShieldCheck className="mt-px size-3.5 shrink-0" aria-hidden />
                     The only manager left. Make someone else a manager before changing this one, so
                     the café cannot lock itself out.
                   </p>
